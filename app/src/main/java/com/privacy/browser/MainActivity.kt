@@ -283,7 +283,7 @@ class MainActivity : AppCompatActivity() {
         val titles = arrayOfNulls<String>(tabs.size)
         for (i in tabs.indices) titles[i] = tabs[i].title.ifBlank { "تبويب ${i + 1}" }
 
-        AlertDialog.Builder(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("التبويبات المفتوحة")
             .setItems(titles) { _: DialogInterface, which: Int ->
                 switchToTab(which)
@@ -450,7 +450,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyDarkMode(webView: WebView) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            WebSettingsCompat.setAlgorithmicDarkening(webView.settings, darkModeEnabled)
+            // WebSettingsCompat.setAlgorithmicDarkening(webView.settings, darkModeEnabled)
         }
     }
 
@@ -682,7 +682,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(titleInput)
         layout.addView(urlInput)
 
-        AlertDialog.Builder(this)
+        androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("إضافة اختصار جديد")
             .setView(layout)
             .setPositiveButton("إضافة") { _: DialogInterface, _: Int ->
