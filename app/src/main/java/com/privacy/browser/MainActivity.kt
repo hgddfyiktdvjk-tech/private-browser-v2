@@ -28,7 +28,7 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.AlertDialog
+import androidx.appcompat.app.AlertDialog
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
