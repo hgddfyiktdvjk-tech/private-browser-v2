@@ -33,6 +33,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
@@ -107,11 +108,11 @@ class MainActivity : AppCompatActivity() {
         gridShortcuts = findViewById(R.id.gridShortcuts)
         tabsButton = findViewById(R.id.tabsButton)
 
-        val backButton: Button = findViewById(R.id.backButton)
-        val homeButton: Button = findViewById(R.id.homeButton)
-        val menuButton: Button = findViewById(R.id.menuButton)
-        val menuButtonTop: Button = findViewById(R.id.menuButtonTop)
-        val downloadsButton: Button = findViewById(R.id.downloadsButton)
+        val backButton: ImageButton = findViewById(R.id.backButton)
+        val homeButton: ImageButton = findViewById(R.id.homeButton)
+        val menuButton: ImageButton = findViewById(R.id.menuButton)
+        val menuButtonTop: ImageButton = findViewById(R.id.menuButtonTop)
+        val downloadsButton: ImageButton = findViewById(R.id.downloadsButton)
         val unlockButton: Button = findViewById(R.id.unlockButton)
 
         loadShortcuts()
@@ -283,7 +284,7 @@ class MainActivity : AppCompatActivity() {
         val titles = arrayOfNulls<String>(tabs.size)
         for (i in tabs.indices) titles[i] = tabs[i].title.ifBlank { "تبويب ${i + 1}" }
 
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("التبويبات المفتوحة")
             .setItems(titles) { _: DialogInterface, which: Int ->
                 switchToTab(which)
@@ -682,7 +683,7 @@ class MainActivity : AppCompatActivity() {
         layout.addView(titleInput)
         layout.addView(urlInput)
 
-        androidx.appcompat.app.AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("إضافة اختصار جديد")
             .setView(layout)
             .setPositiveButton("إضافة") { _: DialogInterface, _: Int ->
