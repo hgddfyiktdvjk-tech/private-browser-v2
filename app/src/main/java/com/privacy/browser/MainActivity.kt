@@ -53,6 +53,12 @@ data class Shortcut(val title: String, val url: String)
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var cyberContainer: FrameLayout
+    private lateinit var cyberFab: ImageButton
+    private lateinit var cyberPanel: FrameLayout
+    private lateinit var cyberPanelTitle: TextView
+    private lateinit var cyberPanelContent: TextView
+    private var cyberOpenPanel: String? = null
     private lateinit var homeScreen: FrameLayout
     private lateinit var browserContainer: FrameLayout
     private lateinit var webViewContainer: FrameLayout
@@ -114,7 +120,25 @@ class MainActivity : AppCompatActivity() {
         val menuButtonTop: ImageButton = findViewById(R.id.menuButtonTop)
         val downloadsButton: ImageButton = findViewById(R.id.downloadsButton)
         val unlockButton: Button = findViewById(R.id.unlockButton)
+        cyberContainer = findViewById(R.id.cyberContainer)
+        cyberFab = findViewById(R.id.cyberFab)
+        cyberPanel = findViewById(R.id.cyberPanel)
+        cyberPanelTitle = findViewById(R.id.cyberPanelTitle)
+        cyberPanelContent = findViewById(R.id.cyberPanelContent)
 
+        val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
+        val cyberFilesButton: Button = findViewById(R.id.cyberFilesButton)
+        val cyberTerminalButton: Button = findViewById(R.id.cyberTerminalButton)
+        val cyberPackagesButton: Button = findViewById(R.id.cyberPackagesButton)
+        val cyberSnippetsButton: Button = findViewById(R.id.cyberSnippetsButton)
+
+        cyberFab.setOnClickListener { openCyberMode() }
+        cyberCloseButton.setOnClickListener { closeCyberMode() }
+        cyberFilesButton.setOnClickListener { toggleCyberPanel("files", "📁 مدير الملفات") }
+        cyberTerminalButton.setOnClickListener { toggleCyberPanel("terminal", "⌨ الترمينال") }
+        cyberPackagesButton.setOnClickListener { toggleCyberPanel("packages", "📦 المكتبات") }
+        cyberSnippetsButton.setOnClickListener { toggleCyberPanel("snippets", "📚 مكتبة الأكواد") }
+        
         loadShortcuts()
         rebuildShortcutsGrid()
 
@@ -190,6 +214,30 @@ class MainActivity : AppCompatActivity() {
         finishAffinity()
     }
 
+    // ---------- الوضع السيبراني ----------
+
+    private fun openCyberMode() {
+        cyberContainer.visibility = View.VISIBLE
+    }
+
+    private fun closeCyberMode() {
+        cyberContainer.visibility = View.GONE
+        cyberPanel.visibility = View.GONE
+        cyberOpenPanel = null
+    }
+
+    private fun toggleCyberPanel(panelKey: String, title: String) {
+        if (cyberOpenPanel == panelKey) {
+            cyberPanel.visibility = View.GONE
+            cyberOpenPanel = null
+        } else {
+            cyberPanelTitle.text = title
+            cyberPanelContent.text = "قريبًا..."
+            cyberPanel.visibility = View.VISIBLE
+            cyberOpenPanel = panelKey
+        }
+    }
+    
     // ---------- التنقل بين الشاشتين ----------
 
     private fun showHomeScreen() {
@@ -203,6 +251,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onBackButtonPressed() {
+        if (cyberContainer.visibility == View.VISIBLE) {
+            closeCyberMode()
+            return
+        }
         val wv = currentWebView()
         when {
             customView != null -> wv?.webChromeClient?.onHideCustomView()
