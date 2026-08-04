@@ -93,13 +93,15 @@
                     android:ellipsize="middle"
                     android:text="" />
 
-                <Button
+                <ImageButton
                     android:id="@+id/menuButtonTop"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="0dp"
-                    android:padding="6dp"
-                    android:text="⋮" />
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@null"
+                    android:padding="8dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_menu"
+                    android:contentDescription="قائمة" />
             </LinearLayout>
 
             <ProgressBar
@@ -134,41 +136,49 @@
         android:paddingVertical="10dp"
         android:gravity="center">
 
-        <Button
+        <ImageButton
             android:id="@+id/backButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:background="@null"
-            android:textColor="#FFFFFF"
-            android:text="◀" />
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_back"
+            android:contentDescription="رجوع" />
 
-        <Button
+        <ImageButton
             android:id="@+id/homeButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:background="@null"
-            android:textColor="#FFFFFF"
-            android:text="🏠" />
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_home"
+            android:contentDescription="الرئيسية" />
 
-        <Button
+        <ImageButton
             android:id="@+id/menuButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:background="@null"
-            android:textColor="#FFFFFF"
-            android:text="⋮" />
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_menu"
+            android:contentDescription="القائمة" />
 
-        <Button
+        <ImageButton
             android:id="@+id/downloadsButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_weight="1"
             android:background="@null"
-            android:textColor="#FFFFFF"
-            android:text="⬇" />
+            android:padding="12dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_download"
+            android:contentDescription="التحميلات" />
 
         <Button
             android:id="@+id/tabsButton"
@@ -201,10 +211,23 @@
             android:orientation="vertical"
             android:gravity="center">
 
+            <ImageButton
+                android:id="@+id/lockIcon"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@null"
+                android:padding="4dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_lock"
+                android:contentDescription="مقفل"
+                android:layout_marginBottom="12dp"
+                android:clickable="false"
+                android:focusable="false" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🔒 التطبيق مقفل"
+                android:text="التطبيق مقفل"
                 android:textColor="#FFFFFF"
                 android:textSize="20sp"
                 android:layout_marginBottom="16dp" />
