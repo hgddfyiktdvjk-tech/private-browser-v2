@@ -37,6 +37,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -47,18 +48,13 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import java.io.ByteArrayInputStream
+import java.io.File
 
 data class Tab(val webView: WebView, var title: String = "تبويب جديد")
 data class Shortcut(val title: String, val url: String)
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var cyberContainer: FrameLayout
-    private lateinit var cyberFab: ImageButton
-    private lateinit var cyberPanel: FrameLayout
-    private lateinit var cyberPanelTitle: TextView
-    private lateinit var cyberPanelContent: TextView
-    private var cyberOpenPanel: String? = null
     private lateinit var homeScreen: FrameLayout
     private lateinit var browserContainer: FrameLayout
     private lateinit var webViewContainer: FrameLayout
@@ -70,6 +66,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var gridShortcuts: GridLayout
     private lateinit var tabsButton: Button
+
+    private lateinit var cyberContainer: FrameLayout
+    private lateinit var cyberFab: ImageButton
+    private lateinit var cyberPanel: FrameLayout
+    private lateinit var cyberPanelTitle: TextView
+    private lateinit var cyberPanelContent: TextView
+    private lateinit var cyberFileManagerContainer: LinearLayout
+    private lateinit var cyberPathLabel: TextView
+    private lateinit var cyberFileListContainer: LinearLayout
+    private lateinit var cyberActiveFileLabel: TextView
+    private lateinit var cyberEditor: EditText
+    private var cyberOpenPanel: String? = null
+
+    private lateinit var rootDir: File
+    private lateinit var currentDir: File
+    private var activeFile: File? = null
 
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
@@ -120,25 +132,31 @@ class MainActivity : AppCompatActivity() {
         val menuButtonTop: ImageButton = findViewById(R.id.menuButtonTop)
         val downloadsButton: ImageButton = findViewById(R.id.downloadsButton)
         val unlockButton: Button = findViewById(R.id.unlockButton)
+
         cyberContainer = findViewById(R.id.cyberContainer)
         cyberFab = findViewById(R.id.cyberFab)
         cyberPanel = findViewById(R.id.cyberPanel)
         cyberPanelTitle = findViewById(R.id.cyberPanelTitle)
         cyberPanelContent = findViewById(R.id.cyberPanelContent)
+        cyberFileManagerContainer = findViewById(R.id.cyberFileManagerContainer)
+        cyberPathLabel = findViewById(R.id.cyberPathLabel)
+        cyberFileListContainer = findViewById(R.id.cyberFileListContainer)
+        cyberActiveFileLabel = findViewById(R.id.cyberActiveFileLabel)
+        cyberEditor = findViewById(R.id.cyberEditor)
 
         val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
         val cyberFilesButton: Button = findViewById(R.id.cyberFilesButton)
         val cyberTerminalButton: Button = findViewById(R.id.cyberTerminalButton)
         val cyberPackagesButton: Button = findViewById(R.id.cyberPackagesButton)
         val cyberSnippetsButton: Button = findViewById(R.id.cyberSnippetsButton)
+        val cyberUpButton: Button = findViewById(R.id.cyberUpButton)
+        val cyberNewFileButton: Button = findViewById(R.id.cyberNewFileButton)
+        val cyberNewFolderButton: Button = findViewById(R.id.cyberNewFolderButton)
 
-        cyberFab.setOnClickListener { openCyberMode() }
-        cyberCloseButton.setOnClickListener { closeCyberMode() }
-        cyberFilesButton.setOnClickListener { toggleCyberPanel("files", "📁 مدير الملفات") }
-        cyberTerminalButton.setOnClickListener { toggleCyberPanel("terminal", "⌨ الترمينال") }
-        cyberPackagesButton.setOnClickListener { toggleCyberPanel("packages", "📦 المكتبات") }
-        cyberSnippetsButton.setOnClickListener { toggleCyberPanel("snippets", "📚 مكتبة الأكواد") }
-        
+        rootDir = File(filesDir, "cyber_projects")
+        if (!rootDir.exists()) rootDir.mkdirs()
+        currentDir = rootDir
+
         loadShortcuts()
         rebuildShortcutsGrid()
 
@@ -170,6 +188,20 @@ class MainActivity : AppCompatActivity() {
             } else {
                 false
             }
+        }
+
+        cyberFab.setOnClickListener { openCyberMode() }
+        cyberCloseButton.setOnClickListener { closeCyberMode() }
+        cyberFilesButton.setOnClickListener { toggleCyberPanel("files", "📁 مدير الملفات") }
+        cyberTerminalButton.setOnClickListener { toggleCyberPanel("terminal", "⌨ الترمينال") }
+        cyberPackagesButton.setOnClickListener { toggleCyberPanel("packages", "📦 المكتبات") }
+        cyberSnippetsButton.setOnClickListener { toggleCyberPanel("snippets", "📚 مكتبة الأكواد") }
+        cyberUpButton.setOnClickListener { navigateUpDirectory() }
+        cyberNewFileButton.setOnClickListener { showNewFileDialog() }
+        cyberNewFolderButton.setOnClickListener { showNewFolderDialog() }
+
+        cyberEditor.setOnFocusChangeListener { _: View, hasFocus: Boolean ->
+            if (!hasFocus) saveActiveFileIfNeeded()
         }
     }
 
@@ -214,13 +246,14 @@ class MainActivity : AppCompatActivity() {
         finishAffinity()
     }
 
-    // ---------- الوضع السيبراني ----------
+    // ---------- الوضع السيبراني: التنقل العام ----------
 
     private fun openCyberMode() {
         cyberContainer.visibility = View.VISIBLE
     }
 
     private fun closeCyberMode() {
+        saveActiveFileIfNeeded()
         cyberContainer.visibility = View.GONE
         cyberPanel.visibility = View.GONE
         cyberOpenPanel = null
@@ -230,14 +263,187 @@ class MainActivity : AppCompatActivity() {
         if (cyberOpenPanel == panelKey) {
             cyberPanel.visibility = View.GONE
             cyberOpenPanel = null
+            return
+        }
+        cyberPanelTitle.text = title
+        if (panelKey == "files") {
+            cyberPanelContent.visibility = View.GONE
+            cyberFileManagerContainer.visibility = View.VISIBLE
+            refreshFileList()
         } else {
-            cyberPanelTitle.text = title
+            cyberFileManagerContainer.visibility = View.GONE
+            cyberPanelContent.visibility = View.VISIBLE
             cyberPanelContent.text = "قريبًا..."
-            cyberPanel.visibility = View.VISIBLE
-            cyberOpenPanel = panelKey
+        }
+        cyberPanel.visibility = View.VISIBLE
+        cyberOpenPanel = panelKey
+    }
+
+    // ---------- الوضع السيبراني: مدير الملفات ----------
+
+    private fun refreshFileList() {
+        cyberFileListContainer.removeAllViews()
+
+        val relativePath = currentDir.absolutePath.removePrefix(rootDir.absolutePath)
+        cyberPathLabel.text = if (relativePath.isBlank()) "/" else relativePath
+
+        val entries = currentDir.listFiles()
+        if (entries != null) {
+            val folders = entries.filter { it.isDirectory }.sortedBy { it.name }
+            val files = entries.filter { it.isFile }.sortedBy { it.name }
+            for (folder in folders) cyberFileListContainer.addView(createFileRow(folder, true))
+            for (file in files) cyberFileListContainer.addView(createFileRow(file, false))
+        }
+
+        if (entries == null || entries.isEmpty()) {
+            val emptyLabel = TextView(this)
+            emptyLabel.text = "لا توجد ملفات هنا"
+            emptyLabel.setTextColor(android.graphics.Color.parseColor("#3A6B45"))
+            emptyLabel.textSize = 12f
+            emptyLabel.setPadding(0, dp(10), 0, 0)
+            cyberFileListContainer.addView(emptyLabel)
         }
     }
-    
+
+    private fun createFileRow(entry: File, isDir: Boolean): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = android.view.Gravity.CENTER_VERTICAL
+        row.setPadding(dp(6), dp(10), dp(6), dp(10))
+
+        val icon = TextView(this)
+        icon.text = if (isDir) "📁" else "📄"
+        icon.textSize = 16f
+        icon.setPadding(0, 0, dp(10), 0)
+
+        val name = TextView(this)
+        name.text = entry.name
+        name.setTextColor(android.graphics.Color.parseColor("#66FF8A"))
+        name.textSize = 13f
+        val nameParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        name.layoutParams = nameParams
+
+        val delete = TextView(this)
+        delete.text = "✕"
+        delete.setTextColor(android.graphics.Color.parseColor("#FF6B6B"))
+        delete.textSize = 14f
+        delete.setPadding(dp(12), 0, dp(4), 0)
+        delete.setOnClickListener { confirmDeleteEntry(entry) }
+
+        row.addView(icon)
+        row.addView(name)
+        row.addView(delete)
+
+        row.setOnClickListener {
+            if (isDir) {
+                currentDir = entry
+                refreshFileList()
+            } else {
+                openFileInEditor(entry)
+            }
+        }
+
+        return row
+    }
+
+    private fun confirmDeleteEntry(entry: File) {
+        AlertDialog.Builder(this)
+            .setTitle("حذف")
+            .setMessage("هل تريد حذف \"${entry.name}\"؟")
+            .setPositiveButton("حذف") { _: DialogInterface, _: Int ->
+                if (activeFile != null && activeFile?.absolutePath == entry.absolutePath) {
+                    activeFile = null
+                    cyberEditor.setText("")
+                    cyberEditor.isEnabled = false
+                    cyberActiveFileLabel.text = "لا يوجد ملف مفتوح"
+                }
+                entry.deleteRecursively()
+                refreshFileList()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun navigateUpDirectory() {
+        if (currentDir.absolutePath != rootDir.absolutePath) {
+            val parent = currentDir.parentFile
+            if (parent != null) {
+                currentDir = parent
+                refreshFileList()
+            }
+        }
+    }
+
+    private fun showNewFileDialog() {
+        val input = EditText(this)
+        input.hint = "اسم الملف (مثال: main.py)"
+        AlertDialog.Builder(this)
+            .setTitle("ملف جديد")
+            .setView(input)
+            .setPositiveButton("إنشاء") { _: DialogInterface, _: Int ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val newFile = File(currentDir, name)
+                    if (!newFile.exists()) {
+                        newFile.createNewFile()
+                        refreshFileList()
+                    } else {
+                        Toast.makeText(this, "الملف موجود مسبقًا", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showNewFolderDialog() {
+        val input = EditText(this)
+        input.hint = "اسم المجلد"
+        AlertDialog.Builder(this)
+            .setTitle("مجلد جديد")
+            .setView(input)
+            .setPositiveButton("إنشاء") { _: DialogInterface, _: Int ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val newFolder = File(currentDir, name)
+                    if (!newFolder.exists()) {
+                        newFolder.mkdirs()
+                        refreshFileList()
+                    } else {
+                        Toast.makeText(this, "المجلد موجود مسبقًا", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun openFileInEditor(file: File) {
+        saveActiveFileIfNeeded()
+        activeFile = file
+        val content = try {
+            file.readText()
+        } catch (e: Exception) {
+            ""
+        }
+        cyberEditor.setText(content)
+        cyberEditor.isEnabled = true
+        cyberActiveFileLabel.text = "📄 ${file.name}"
+        cyberPanel.visibility = View.GONE
+        cyberOpenPanel = null
+    }
+
+    private fun saveActiveFileIfNeeded() {
+        val file = activeFile
+        if (file != null) {
+            try {
+                file.writeText(cyberEditor.text.toString())
+            } catch (e: Exception) {
+                // تجاهل بصمت لو فشل الحفظ
+            }
+        }
+    }
+
     // ---------- التنقل بين الشاشتين ----------
 
     private fun showHomeScreen() {
