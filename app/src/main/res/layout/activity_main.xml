@@ -329,16 +329,44 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:padding="18dp">
+                android:padding="14dp">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:text="// منطقة المحرر — قريبًا"
-                    android:textColor="#3DFF7A"
-                    android:textSize="14sp"
-                    android:fontFamily="monospace"
-                    android:alpha="0.6" />
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/cyberActiveFileLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="لا يوجد ملف مفتوح"
+                        android:textColor="#66FF8A"
+                        android:textSize="12sp"
+                        android:fontFamily="monospace"
+                        android:layout_marginBottom="8dp" />
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <EditText
+                            android:id="@+id/cyberEditor"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@null"
+                            android:gravity="top|start"
+                            android:textColor="#3DFF7A"
+                            android:textColorHint="#2A5533"
+                            android:hint="افتح ملف من قائمة الملفات لبدء الكتابة"
+                            android:textSize="14sp"
+                            android:fontFamily="monospace"
+                            android:inputType="textMultiLine|textNoSuggestions"
+                            android:enabled="false"
+                            android:minLines="10" />
+                    </ScrollView>
+                </LinearLayout>
             </FrameLayout>
 
             <View
@@ -454,6 +482,86 @@
                     android:textColor="#66FF8A"
                     android:textSize="13sp"
                     android:fontFamily="monospace" />
+
+                <LinearLayout
+                    android:id="@+id/cyberFileManagerContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:id="@+id/cyberPathLabel"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="/"
+                            android:textColor="#66FF8A"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:singleLine="true"
+                            android:ellipsize="start" />
+
+                        <Button
+                            android:id="@+id/cyberUpButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="0dp"
+                            android:padding="6dp"
+                            android:background="@drawable/bg_cyber_button_selector"
+                            android:textColor="#00FF41"
+                            android:textSize="11sp"
+                            android:text="⬆ للأعلى" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="10dp">
+
+                        <Button
+                            android:id="@+id/cyberNewFileButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:background="@drawable/bg_cyber_button_selector"
+                            android:textColor="#00FF41"
+                            android:textSize="11sp"
+                            android:text="＋ ملف جديد" />
+
+                        <Button
+                            android:id="@+id/cyberNewFolderButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_cyber_button_selector"
+                            android:textColor="#00FF41"
+                            android:textSize="11sp"
+                            android:text="＋ مجلد جديد" />
+                    </LinearLayout>
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <LinearLayout
+                            android:id="@+id/cyberFileListContainer"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </ScrollView>
+                </LinearLayout>
             </LinearLayout>
         </FrameLayout>
 
