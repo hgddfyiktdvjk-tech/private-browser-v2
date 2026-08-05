@@ -18,6 +18,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.JsResult
 import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
@@ -37,7 +38,6 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -47,6 +47,7 @@ import androidx.core.content.ContextCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
 
@@ -77,7 +78,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cyberFileListContainer: LinearLayout
     private lateinit var cyberActiveFileLabel: TextView
     private lateinit var cyberEditor: EditText
+    private lateinit var cyberTerminalContainer: LinearLayout
+    private lateinit var cyberTerminalOutput: TextView
+    private lateinit var pyodideWebView: WebView
     private var cyberOpenPanel: String? = null
+    private var pyodideReady = false
 
     private lateinit var rootDir: File
     private lateinit var currentDir: File
@@ -143,6 +148,9 @@ class MainActivity : AppCompatActivity() {
         cyberFileListContainer = findViewById(R.id.cyberFileListContainer)
         cyberActiveFileLabel = findViewById(R.id.cyberActiveFileLabel)
         cyberEditor = findViewById(R.id.cyberEditor)
+        cyberTerminalContainer = findViewById(R.id.cyberTerminalContainer)
+        cyberTerminalOutput = findViewById(R.id.cyberTerminalOutput)
+        pyodideWebView = findViewById(R.id.pyodideWebView)
 
         val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
         val cyberFilesButton: Button = findViewById(R.id.cyberFilesButton)
@@ -152,10 +160,14 @@ class MainActivity : AppCompatActivity() {
         val cyberUpButton: Button = findViewById(R.id.cyberUpButton)
         val cyberNewFileButton: Button = findViewById(R.id.cyberNewFileButton)
         val cyberNewFolderButton: Button = findViewById(R.id.cyberNewFolderButton)
+        val cyberRunButton: Button = findViewById(R.id.cyberRunButton)
+        val cyberClearTerminalButton: Button = findViewById(R.id.cyberClearTerminalButton)
 
         rootDir = File(filesDir, "cyber_projects")
         if (!rootDir.exists()) rootDir.mkdirs()
         currentDir = rootDir
+
+        setupPyodideWebView()
 
         loadShortcuts()
         rebuildShortcutsGrid()
@@ -199,10 +211,78 @@ class MainActivity : AppCompatActivity() {
         cyberUpButton.setOnClickListener { navigateUpDirectory() }
         cyberNewFileButton.setOnClickListener { showNewFileDialog() }
         cyberNewFolderButton.setOnClickListener { showNewFolderDialog() }
+        cyberRunButton.setOnClickListener { runActiveFileAsPython() }
+        cyberClearTerminalButton.setOnClickListener { cyberTerminalOutput.text = "" }
 
         cyberEditor.setOnFocusChangeListener { _: View, hasFocus: Boolean ->
             if (!hasFocus) saveActiveFileIfNeeded()
         }
+    }
+
+    // ---------- بايثون (Pyodide) ----------
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupPyodideWebView() {
+        pyodideWebView.settings.javaScriptEnabled = true
+        pyodideWebView.settings.domStorageEnabled = true
+        pyodideWebView.addJavascriptInterface(PyBridge(), "Android")
+        pyodideWebView.webViewClient = object : WebViewClient() {}
+        pyodideWebView.loadUrl("file:///android_asset/pyodide_runner.html")
+    }
+
+    private inner class PyBridge {
+        @JavascriptInterface
+        fun onPyodideReady() {
+            runOnUiThread {
+                pyodideReady = true
+                cyberTerminalOutput.append("✅ بايثون جاهز\n")
+            }
+        }
+
+        @JavascriptInterface
+        fun onPyodideError(message: String) {
+            runOnUiThread {
+                cyberTerminalOutput.append("❌ فشل تجهيز بايثون: $message\n")
+            }
+        }
+
+        @JavascriptInterface
+        fun onPythonOutput(text: String) {
+            runOnUiThread {
+                cyberTerminalOutput.append(text)
+            }
+        }
+
+        @JavascriptInterface
+        fun onPythonDone() {
+            runOnUiThread {
+                cyberTerminalOutput.append("\n✅ انتهى التنفيذ\n")
+            }
+        }
+
+        @JavascriptInterface
+        fun onPythonError(message: String) {
+            runOnUiThread {
+                cyberTerminalOutput.append("\n❌ خطأ: $message\n")
+            }
+        }
+    }
+
+    private fun runActiveFileAsPython() {
+        val file = activeFile
+        if (file == null) {
+            Toast.makeText(this, "افتح ملف بايثون أولاً من قائمة الملفات", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!pyodideReady) {
+            Toast.makeText(this, "بايثون لسا يتجهز، انتظر شوي", Toast.LENGTH_SHORT).show()
+            return
+        }
+        saveActiveFileIfNeeded()
+        val code = cyberEditor.text.toString()
+        cyberTerminalOutput.append("\n▶ تشغيل: ${file.name}\n")
+        val encodedCode = JSONObject.quote(code)
+        pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
     }
 
     // ---------- القفل ----------
@@ -266,14 +346,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
         cyberPanelTitle.text = title
-        if (panelKey == "files") {
-            cyberPanelContent.visibility = View.GONE
-            cyberFileManagerContainer.visibility = View.VISIBLE
-            refreshFileList()
-        } else {
-            cyberFileManagerContainer.visibility = View.GONE
-            cyberPanelContent.visibility = View.VISIBLE
-            cyberPanelContent.text = "قريبًا..."
+        cyberPanelContent.visibility = View.GONE
+        cyberFileManagerContainer.visibility = View.GONE
+        cyberTerminalContainer.visibility = View.GONE
+
+        when (panelKey) {
+            "files" -> {
+                cyberFileManagerContainer.visibility = View.VISIBLE
+                refreshFileList()
+            }
+            "terminal" -> {
+                cyberTerminalContainer.visibility = View.VISIBLE
+            }
+            else -> {
+                cyberPanelContent.visibility = View.VISIBLE
+                cyberPanelContent.text = "قريبًا..."
+            }
         }
         cyberPanel.visibility = View.VISIBLE
         cyberOpenPanel = panelKey
