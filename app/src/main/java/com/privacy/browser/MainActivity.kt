@@ -162,6 +162,8 @@ class MainActivity : AppCompatActivity() {
         val cyberNewFolderButton: Button = findViewById(R.id.cyberNewFolderButton)
         val cyberRunButton: Button = findViewById(R.id.cyberRunButton)
         val cyberClearTerminalButton: Button = findViewById(R.id.cyberClearTerminalButton)
+        val cyberRunCommandButton: Button = findViewById(R.id.cyberRunCommandButton)
+        val cyberCommandInput: EditText = findViewById(R.id.cyberCommandInput)
 
         rootDir = File(filesDir, "cyber_projects")
         if (!rootDir.exists()) rootDir.mkdirs()
@@ -213,6 +215,18 @@ class MainActivity : AppCompatActivity() {
         cyberNewFolderButton.setOnClickListener { showNewFolderDialog() }
         cyberRunButton.setOnClickListener { runActiveFileAsPython() }
         cyberClearTerminalButton.setOnClickListener { cyberTerminalOutput.text = "" }
+        cyberRunCommandButton.setOnClickListener { runTerminalCommand(cyberCommandInput) }
+
+        cyberCommandInput.setOnEditorActionListener { _: TextView, actionId: Int, event: KeyEvent? ->
+            if (actionId == EditorInfo.IME_ACTION_GO ||
+                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)
+            ) {
+                runTerminalCommand(cyberCommandInput)
+                true
+            } else {
+                false
+            }
+        }
 
         cyberEditor.setOnFocusChangeListener { _: View, hasFocus: Boolean ->
             if (!hasFocus) saveActiveFileIfNeeded()
@@ -283,6 +297,19 @@ class MainActivity : AppCompatActivity() {
         cyberTerminalOutput.append("\n▶ تشغيل: ${file.name}\n")
         val encodedCode = JSONObject.quote(code)
         pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
+    }
+
+    private fun runTerminalCommand(input: EditText) {
+        val command = input.text.toString().trim()
+        if (command.isEmpty()) return
+        if (!pyodideReady) {
+            Toast.makeText(this, "بايثون لسا يتجهز، انتظر شوي", Toast.LENGTH_SHORT).show()
+            return
+        }
+        cyberTerminalOutput.append("\n>>> $command\n")
+        val encodedCode = JSONObject.quote(command)
+        pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
+        input.setText("")
     }
 
     // ---------- القفل ----------
