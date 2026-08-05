@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+</head>
+<body>
+<script>
+var pyodideInstance = null;
+
+async function initPyodide() {
+    try {
+        pyodideInstance = await loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/"
+        });
+        pyodideInstance.setStdout({ batched: function(s) { Android.onPythonOutput(s); } });
+        pyodideInstance.setStderr({ batched: function(s) { Android.onPythonOutput(s); } });
+        Android.onPyodideReady();
+    } catch (err) {
+        Android.onPyodideError(err.toString());
+    }
+}
+
+async function runPythonCode(code) {
+    if (!pyodideInstance) {
+        Android.onPythonError("بايثون لسا ما جهز، انتظر شوي وحاول ثانية");
+        return;
+    }
+    try {
+        await pyodideInstance.runPythonAsync(code);
+        Android.onPythonDone();
+    } catch (err) {
+        Android.onPythonError(err.toString());
+    }
+}
+
+initPyodide();
+</script>
+</body>
+</html>
