@@ -7,6 +7,7 @@
 <body>
 <script>
 var pyodideInstance = null;
+var micropipLoaded = false;
 
 async function initPyodide() {
     try {
@@ -31,6 +32,24 @@ async function runPythonCode(code) {
         Android.onPythonDone();
     } catch (err) {
         Android.onPythonError(err.toString());
+    }
+}
+
+async function installPackage(name) {
+    if (!pyodideInstance) {
+        Android.onPackageError(name, "بايثون لسا ما جهز");
+        return;
+    }
+    try {
+        if (!micropipLoaded) {
+            await pyodideInstance.loadPackage("micropip");
+            micropipLoaded = true;
+        }
+        const micropip = pyodideInstance.pyimport("micropip");
+        await micropip.install(name);
+        Android.onPackageInstalled(name);
+    } catch (err) {
+        Android.onPackageError(name, err.toString());
     }
 }
 
