@@ -473,16 +473,6 @@
                     android:layout_marginBottom="14dp"
                     android:background="@drawable/divider_glow" />
 
-                <TextView
-                    android:id="@+id/cyberPanelContent"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:text="قريبًا..."
-                    android:textColor="#66FF8A"
-                    android:textSize="13sp"
-                    android:fontFamily="monospace" />
-
                 <LinearLayout
                     android:id="@+id/cyberFileManagerContainer"
                     android:layout_width="match_parent"
@@ -581,7 +571,7 @@
                             android:id="@+id/cyberTerminalOutput"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="جاري تجهيز بايثون...\n"
+                            android:text=""
                             android:textColor="#66FF8A"
                             android:textSize="12sp"
                             android:fontFamily="monospace" />
@@ -656,6 +646,98 @@
                             android:textSize="12sp"
                             android:text="🧹 مسح" />
                     </LinearLayout>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/cyberPackagesContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="10dp">
+
+                        <EditText
+                            android:id="@+id/cyberPackageInput"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:background="@drawable/bg_cyber_button_selector"
+                            android:hint="اسم المكتبة (مثال: numpy)"
+                            android:textColor="#3DFF7A"
+                            android:textColorHint="#2A5533"
+                            android:textSize="12sp"
+                            android:fontFamily="monospace"
+                            android:paddingHorizontal="10dp"
+                            android:singleLine="true" />
+
+                        <Button
+                            android:id="@+id/cyberInstallPackageButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_cyber_button_selector"
+                            android:textColor="#00FF41"
+                            android:textSize="11sp"
+                            android:text="⬇ تثبيت" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="المكتبات المثبتة:"
+                        android:textColor="#66FF8A"
+                        android:textSize="12sp"
+                        android:fontFamily="monospace"
+                        android:layout_marginBottom="6dp" />
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <LinearLayout
+                            android:id="@+id/cyberPackageListContainer"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </ScrollView>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/cyberSnippetsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <Button
+                        android:id="@+id/cyberAddSnippetButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        android:background="@drawable/bg_cyber_button_selector"
+                        android:textColor="#00FF41"
+                        android:textSize="12sp"
+                        android:text="＋ إضافة كود جديد" />
+
+                    <ScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <LinearLayout
+                            android:id="@+id/cyberSnippetListContainer"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical" />
+                    </ScrollView>
                 </LinearLayout>
 
             </LinearLayout>
