@@ -210,6 +210,12 @@ class MainActivity : AppCompatActivity() {
 
         swipeRefresh.setOnRefreshListener { currentWebView()?.reload() }
 
+        swipeRefresh.setOnChildScrollUpCallback(object : SwipeRefreshLayout.OnChildScrollUpCallback {
+            override fun canChildScrollUp(parent: SwipeRefreshLayout, child: View?): Boolean {
+                return currentWebView()?.canScrollVertically(-1) ?: false
+            }
+        })
+
         homeSearchBar.setOnEditorActionListener { _: TextView, actionId: Int, event: KeyEvent? ->
             if (actionId == EditorInfo.IME_ACTION_GO ||
                 (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)
@@ -1209,7 +1215,7 @@ class MainActivity : AppCompatActivity() {
     private fun createShortcutTile(index: Int, shortcut: Shortcut): View {
         val container = FrameLayout(this)
         container.tag = index
-        container.setBackgroundResource(R.drawable.bg_tile)
+        container.setBackgroundResource(R.drawable.bg_tile_v2)
 
         val inner = LinearLayout(this)
         inner.orientation = LinearLayout.VERTICAL
@@ -1275,7 +1281,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun createAddTile(): View {
         val container = FrameLayout(this)
-        container.setBackgroundResource(R.drawable.bg_tile)
+        container.setBackgroundResource(R.drawable.bg_tile_v2)
 
         val label = TextView(this)
         label.text = "+"
