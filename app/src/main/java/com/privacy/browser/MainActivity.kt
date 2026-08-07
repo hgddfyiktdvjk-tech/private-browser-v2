@@ -10,6 +10,9 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.text.Spannable
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.DragEvent
 import android.view.KeyEvent
@@ -53,6 +56,7 @@ import java.io.File
 
 data class Tab(val webView: WebView, var title: String = "تبويب جديد")
 data class Shortcut(val title: String, val url: String)
+data class Snippet(val title: String, val code: String)
 
 class MainActivity : AppCompatActivity() {
 
@@ -72,7 +76,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cyberFab: ImageButton
     private lateinit var cyberPanel: FrameLayout
     private lateinit var cyberPanelTitle: TextView
-    private lateinit var cyberPanelContent: TextView
     private lateinit var cyberFileManagerContainer: LinearLayout
     private lateinit var cyberPathLabel: TextView
     private lateinit var cyberFileListContainer: LinearLayout
@@ -80,13 +83,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cyberEditor: EditText
     private lateinit var cyberTerminalContainer: LinearLayout
     private lateinit var cyberTerminalOutput: TextView
+    private lateinit var cyberPackagesContainer: LinearLayout
+    private lateinit var cyberPackageListContainer: LinearLayout
+    private lateinit var cyberSnippetsContainer: LinearLayout
+    private lateinit var cyberSnippetListContainer: LinearLayout
     private lateinit var pyodideWebView: WebView
     private var cyberOpenPanel: String? = null
     private var pyodideReady = false
 
+    private val terminalBuilder = SpannableStringBuilder()
+
     private lateinit var rootDir: File
     private lateinit var currentDir: File
     private var activeFile: File? = null
+
+    private val installedPackages = mutableListOf<String>()
+    private val snippets = mutableListOf<Snippet>()
 
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
@@ -142,7 +154,6 @@ class MainActivity : AppCompatActivity() {
         cyberFab = findViewById(R.id.cyberFab)
         cyberPanel = findViewById(R.id.cyberPanel)
         cyberPanelTitle = findViewById(R.id.cyberPanelTitle)
-        cyberPanelContent = findViewById(R.id.cyberPanelContent)
         cyberFileManagerContainer = findViewById(R.id.cyberFileManagerContainer)
         cyberPathLabel = findViewById(R.id.cyberPathLabel)
         cyberFileListContainer = findViewById(R.id.cyberFileListContainer)
@@ -150,6 +161,10 @@ class MainActivity : AppCompatActivity() {
         cyberEditor = findViewById(R.id.cyberEditor)
         cyberTerminalContainer = findViewById(R.id.cyberTerminalContainer)
         cyberTerminalOutput = findViewById(R.id.cyberTerminalOutput)
+        cyberPackagesContainer = findViewById(R.id.cyberPackagesContainer)
+        cyberPackageListContainer = findViewById(R.id.cyberPackageListContainer)
+        cyberSnippetsContainer = findViewById(R.id.cyberSnippetsContainer)
+        cyberSnippetListContainer = findViewById(R.id.cyberSnippetListContainer)
         pyodideWebView = findViewById(R.id.pyodideWebView)
 
         val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
@@ -164,12 +179,17 @@ class MainActivity : AppCompatActivity() {
         val cyberClearTerminalButton: Button = findViewById(R.id.cyberClearTerminalButton)
         val cyberRunCommandButton: Button = findViewById(R.id.cyberRunCommandButton)
         val cyberCommandInput: EditText = findViewById(R.id.cyberCommandInput)
+        val cyberPackageInput: EditText = findViewById(R.id.cyberPackageInput)
+        val cyberInstallPackageButton: Button = findViewById(R.id.cyberInstallPackageButton)
+        val cyberAddSnippetButton: Button = findViewById(R.id.cyberAddSnippetButton)
 
         rootDir = File(filesDir, "cyber_projects")
         if (!rootDir.exists()) rootDir.mkdirs()
         currentDir = rootDir
 
         setupPyodideWebView()
+        loadInstalledPackages()
+        loadSnippets()
 
         loadShortcuts()
         rebuildShortcutsGrid()
@@ -214,8 +234,13 @@ class MainActivity : AppCompatActivity() {
         cyberNewFileButton.setOnClickListener { showNewFileDialog() }
         cyberNewFolderButton.setOnClickListener { showNewFolderDialog() }
         cyberRunButton.setOnClickListener { runActiveFileAsPython() }
-        cyberClearTerminalButton.setOnClickListener { cyberTerminalOutput.text = "" }
+        cyberClearTerminalButton.setOnClickListener {
+            terminalBuilder.clear()
+            cyberTerminalOutput.text = ""
+        }
         cyberRunCommandButton.setOnClickListener { runTerminalCommand(cyberCommandInput) }
+        cyberInstallPackageButton.setOnClickListener { installPackageFromInput(cyberPackageInput) }
+        cyberAddSnippetButton.setOnClickListener { showAddSnippetDialog() }
 
         cyberCommandInput.setOnEditorActionListener { _: TextView, actionId: Int, event: KeyEvent? ->
             if (actionId == EditorInfo.IME_ACTION_GO ||
@@ -244,40 +269,71 @@ class MainActivity : AppCompatActivity() {
         pyodideWebView.loadUrl("file:///android_asset/pyodide_runner.html")
     }
 
+    private fun appendTerminal(text: String, colorHex: String) {
+        val start = terminalBuilder.length
+        terminalBuilder.append(text)
+        terminalBuilder.setSpan(
+            ForegroundColorSpan(android.graphics.Color.parseColor(colorHex)),
+            start,
+            terminalBuilder.length,
+            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        cyberTerminalOutput.text = terminalBuilder
+    }
+
     private inner class PyBridge {
         @JavascriptInterface
         fun onPyodideReady() {
             runOnUiThread {
                 pyodideReady = true
-                cyberTerminalOutput.append("✅ بايثون جاهز\n")
+                appendTerminal("✅ بايثون جاهز\n", "#00FF41")
             }
         }
 
         @JavascriptInterface
         fun onPyodideError(message: String) {
             runOnUiThread {
-                cyberTerminalOutput.append("❌ فشل تجهيز بايثون: $message\n")
+                appendTerminal("❌ فشل تجهيز بايثون: $message\n", "#FF6B6B")
             }
         }
 
         @JavascriptInterface
         fun onPythonOutput(text: String) {
             runOnUiThread {
-                cyberTerminalOutput.append(text)
+                appendTerminal(text, "#66FF8A")
             }
         }
 
         @JavascriptInterface
         fun onPythonDone() {
             runOnUiThread {
-                cyberTerminalOutput.append("\n✅ انتهى التنفيذ\n")
+                appendTerminal("\n✅ انتهى التنفيذ\n", "#00FF41")
             }
         }
 
         @JavascriptInterface
         fun onPythonError(message: String) {
             runOnUiThread {
-                cyberTerminalOutput.append("\n❌ خطأ: $message\n")
+                appendTerminal("\n❌ خطأ: $message\n", "#FF6B6B")
+            }
+        }
+
+        @JavascriptInterface
+        fun onPackageInstalled(name: String) {
+            runOnUiThread {
+                if (!installedPackages.contains(name)) {
+                    installedPackages.add(name)
+                    saveInstalledPackages()
+                    refreshPackageList()
+                }
+                Toast.makeText(this@MainActivity, "تم تثبيت $name بنجاح", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        @JavascriptInterface
+        fun onPackageError(name: String, message: String) {
+            runOnUiThread {
+                Toast.makeText(this@MainActivity, "فشل تثبيت $name: $message", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -294,7 +350,7 @@ class MainActivity : AppCompatActivity() {
         }
         saveActiveFileIfNeeded()
         val code = cyberEditor.text.toString()
-        cyberTerminalOutput.append("\n▶ تشغيل: ${file.name}\n")
+        appendTerminal("\n▶ تشغيل: ${file.name}\n", "#00FF41")
         val encodedCode = JSONObject.quote(code)
         pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
     }
@@ -306,10 +362,200 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "بايثون لسا يتجهز، انتظر شوي", Toast.LENGTH_SHORT).show()
             return
         }
-        cyberTerminalOutput.append("\n>>> $command\n")
+        appendTerminal("\n>>> $command\n", "#00FF41")
         val encodedCode = JSONObject.quote(command)
         pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
         input.setText("")
+    }
+
+    // ---------- المكتبات ----------
+
+    private fun installPackageFromInput(input: EditText) {
+        val name = input.text.toString().trim()
+        if (name.isEmpty()) return
+        if (!pyodideReady) {
+            Toast.makeText(this, "بايثون لسا يتجهز، انتظر شوي", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(this, "جاري تثبيت $name...", Toast.LENGTH_SHORT).show()
+        val encodedName = JSONObject.quote(name)
+        pyodideWebView.evaluateJavascript("installPackage($encodedName)", null)
+        input.setText("")
+    }
+
+    private fun loadInstalledPackages() {
+        val prefs = getSharedPreferences("packages_prefs", MODE_PRIVATE)
+        val raw = prefs.getString("list", "") ?: ""
+        installedPackages.clear()
+        if (raw.isNotBlank()) {
+            installedPackages.addAll(raw.split("\u0002").filter { it.isNotBlank() })
+        }
+        refreshPackageList()
+    }
+
+    private fun saveInstalledPackages() {
+        val prefs = getSharedPreferences("packages_prefs", MODE_PRIVATE)
+        prefs.edit().putString("list", installedPackages.joinToString("\u0002")).apply()
+    }
+
+    private fun refreshPackageList() {
+        cyberPackageListContainer.removeAllViews()
+        if (installedPackages.isEmpty()) {
+            val emptyLabel = TextView(this)
+            emptyLabel.text = "لا توجد مكتبات مثبتة بعد"
+            emptyLabel.setTextColor(android.graphics.Color.parseColor("#3A6B45"))
+            emptyLabel.textSize = 12f
+            cyberPackageListContainer.addView(emptyLabel)
+            return
+        }
+        for (name in installedPackages) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = android.view.Gravity.CENTER_VERTICAL
+            row.setPadding(dp(6), dp(8), dp(6), dp(8))
+
+            val label = TextView(this)
+            label.text = "📦 $name"
+            label.setTextColor(android.graphics.Color.parseColor("#66FF8A"))
+            label.textSize = 13f
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            label.layoutParams = lp
+
+            val remove = TextView(this)
+            remove.text = "✕"
+            remove.setTextColor(android.graphics.Color.parseColor("#FF6B6B"))
+            remove.textSize = 14f
+            remove.setPadding(dp(12), 0, dp(4), 0)
+            remove.setOnClickListener {
+                installedPackages.remove(name)
+                saveInstalledPackages()
+                refreshPackageList()
+            }
+
+            row.addView(label)
+            row.addView(remove)
+            cyberPackageListContainer.addView(row)
+        }
+    }
+
+    // ---------- مكتبة الأكواد (Snippets) ----------
+
+    private fun loadSnippets() {
+        val prefs = getSharedPreferences("snippets_prefs", MODE_PRIVATE)
+        val raw = prefs.getString("list", "") ?: ""
+        snippets.clear()
+        if (raw.isNotBlank()) {
+            val entries = raw.split("\u0003")
+            for (entry in entries) {
+                val parts = entry.split("\u0001")
+                if (parts.size == 2) snippets.add(Snippet(parts[0], parts[1]))
+            }
+        }
+        refreshSnippetList()
+    }
+
+    private fun saveSnippets() {
+        val prefs = getSharedPreferences("snippets_prefs", MODE_PRIVATE)
+        val sb = StringBuilder()
+        for (i in snippets.indices) {
+            if (i > 0) sb.append("\u0003")
+            sb.append(snippets[i].title)
+            sb.append("\u0001")
+            sb.append(snippets[i].code)
+        }
+        prefs.edit().putString("list", sb.toString()).apply()
+    }
+
+    private fun refreshSnippetList() {
+        cyberSnippetListContainer.removeAllViews()
+        if (snippets.isEmpty()) {
+            val emptyLabel = TextView(this)
+            emptyLabel.text = "لا توجد أكواد محفوظة بعد"
+            emptyLabel.setTextColor(android.graphics.Color.parseColor("#3A6B45"))
+            emptyLabel.textSize = 12f
+            cyberSnippetListContainer.addView(emptyLabel)
+            return
+        }
+        for (i in snippets.indices) {
+            val snippet = snippets[i]
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = android.view.Gravity.CENTER_VERTICAL
+            row.setPadding(dp(6), dp(10), dp(6), dp(10))
+
+            val label = TextView(this)
+            label.text = "📄 ${snippet.title}"
+            label.setTextColor(android.graphics.Color.parseColor("#66FF8A"))
+            label.textSize = 13f
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            label.layoutParams = lp
+
+            val remove = TextView(this)
+            remove.text = "✕"
+            remove.setTextColor(android.graphics.Color.parseColor("#FF6B6B"))
+            remove.textSize = 14f
+            remove.setPadding(dp(12), 0, dp(4), 0)
+            remove.setOnClickListener {
+                snippets.removeAt(i)
+                saveSnippets()
+                refreshSnippetList()
+            }
+
+            row.addView(label)
+            row.addView(remove)
+
+            row.setOnClickListener { insertSnippetIntoEditor(snippet) }
+
+            cyberSnippetListContainer.addView(row)
+        }
+    }
+
+    private fun showAddSnippetDialog() {
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10))
+
+        val titleInput = EditText(this)
+        titleInput.hint = "عنوان الكود (مثال: قراءة ملف)"
+
+        val codeInput = EditText(this)
+        codeInput.hint = "الصق الكود هنا"
+        codeInput.minLines = 4
+        codeInput.gravity = android.view.Gravity.TOP
+
+        layout.addView(titleInput)
+        layout.addView(codeInput)
+
+        AlertDialog.Builder(this)
+            .setTitle("إضافة كود جديد")
+            .setView(layout)
+            .setPositiveButton("حفظ") { _: DialogInterface, _: Int ->
+                val title = titleInput.text.toString().trim()
+                val code = codeInput.text.toString()
+                if (title.isEmpty() || code.isBlank()) {
+                    Toast.makeText(this, "الرجاء تعبئة الحقلين", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                snippets.add(Snippet(title, code))
+                saveSnippets()
+                refreshSnippetList()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun insertSnippetIntoEditor(snippet: Snippet) {
+        if (activeFile == null) {
+            Toast.makeText(this, "افتح ملف أولاً من قائمة الملفات", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = cyberEditor.text.toString()
+        val newText = if (current.isEmpty()) snippet.code else "$current\n${snippet.code}"
+        cyberEditor.setText(newText)
+        cyberEditor.setSelection(cyberEditor.text.length)
+        cyberPanel.visibility = View.GONE
+        cyberOpenPanel = null
+        Toast.makeText(this, "تمت إضافة الكود", Toast.LENGTH_SHORT).show()
     }
 
     // ---------- القفل ----------
@@ -373,9 +619,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         cyberPanelTitle.text = title
-        cyberPanelContent.visibility = View.GONE
         cyberFileManagerContainer.visibility = View.GONE
         cyberTerminalContainer.visibility = View.GONE
+        cyberPackagesContainer.visibility = View.GONE
+        cyberSnippetsContainer.visibility = View.GONE
 
         when (panelKey) {
             "files" -> {
@@ -385,9 +632,13 @@ class MainActivity : AppCompatActivity() {
             "terminal" -> {
                 cyberTerminalContainer.visibility = View.VISIBLE
             }
-            else -> {
-                cyberPanelContent.visibility = View.VISIBLE
-                cyberPanelContent.text = "قريبًا..."
+            "packages" -> {
+                cyberPackagesContainer.visibility = View.VISIBLE
+                refreshPackageList()
+            }
+            "snippets" -> {
+                cyberSnippetsContainer.visibility = View.VISIBLE
+                refreshSnippetList()
             }
         }
         cyberPanel.visibility = View.VISIBLE
