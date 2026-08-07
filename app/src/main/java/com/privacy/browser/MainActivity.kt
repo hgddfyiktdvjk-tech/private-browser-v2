@@ -691,6 +691,8 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
 
+        settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; SM-A265F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36"
+
         applyDarkMode(webView)
 
         webView.setDownloadListener(
