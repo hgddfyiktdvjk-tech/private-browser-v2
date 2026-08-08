@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var gridShortcuts: GridLayout
     private lateinit var tabsButton: Button
+    private lateinit var bottomBar: LinearLayout
 
     private lateinit var cyberContainer: FrameLayout
     private lateinit var cyberFab: ImageButton
@@ -91,6 +92,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cyberPackageListContainer: LinearLayout
     private lateinit var cyberSnippetsContainer: LinearLayout
     private lateinit var cyberSnippetListContainer: LinearLayout
+    private lateinit var cyberInstallPackageButton: Button
     private lateinit var pyodideWebView: WebView
     private var cyberOpenPanel: String? = null
     private var pyodideReady = false
@@ -146,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         gridShortcuts = findViewById(R.id.gridShortcuts)
         tabsButton = findViewById(R.id.tabsButton)
+        bottomBar = findViewById(R.id.bottomBar)
 
         val backButton: ImageButton = findViewById(R.id.backButton)
         val homeButton: ImageButton = findViewById(R.id.homeButton)
@@ -171,6 +174,7 @@ class MainActivity : AppCompatActivity() {
         cyberPackageListContainer = findViewById(R.id.cyberPackageListContainer)
         cyberSnippetsContainer = findViewById(R.id.cyberSnippetsContainer)
         cyberSnippetListContainer = findViewById(R.id.cyberSnippetListContainer)
+        cyberInstallPackageButton = findViewById(R.id.cyberInstallPackageButton)
         pyodideWebView = findViewById(R.id.pyodideWebView)
 
         val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
@@ -186,7 +190,6 @@ class MainActivity : AppCompatActivity() {
         val cyberRunCommandButton: Button = findViewById(R.id.cyberRunCommandButton)
         val cyberCommandInput: EditText = findViewById(R.id.cyberCommandInput)
         val cyberPackageInput: EditText = findViewById(R.id.cyberPackageInput)
-        val cyberInstallPackageButton: Button = findViewById(R.id.cyberInstallPackageButton)
         val cyberAddSnippetButton: Button = findViewById(R.id.cyberAddSnippetButton)
 
         rootDir = File(filesDir, "cyber_projects")
@@ -196,6 +199,8 @@ class MainActivity : AppCompatActivity() {
         setupPyodideWebView()
         loadInstalledPackages()
         loadSnippets()
+        restoreActiveFileIfAny()
+        restoreTabsState()
 
         loadShortcuts()
         rebuildShortcutsGrid()
@@ -272,6 +277,80 @@ class MainActivity : AppCompatActivity() {
 
         cyberEditor.setOnFocusChangeListener { _: View, hasFocus: Boolean ->
             if (!hasFocus) saveActiveFileIfNeeded()
+        }
+
+        updateChromeVisibility()
+    }
+
+    // ---------- إدارة ظهور الأزرار العائمة (الإصلاح الجديد) ----------
+
+    private fun updateChromeVisibility() {
+        val shouldHide = isLocked || customView != null || cyberContainer.visibility == View.VISIBLE
+        val visibility = if (shouldHide) View.GONE else View.VISIBLE
+        bottomBar.visibility = visibility
+        cyberFab.visibility = visibility
+    }
+
+    // ---------- حفظ واستعادة التبويبات ----------
+
+    private fun saveTabsState() {
+        val prefs = getSharedPreferences("tabs_prefs", MODE_PRIVATE)
+        val sb = StringBuilder()
+        for (i in tabs.indices) {
+            if (i > 0) sb.append("\u0002")
+            sb.append(tabs[i].webView.url ?: "")
+        }
+        prefs.edit()
+            .putString("urls", sb.toString())
+            .putInt("current", currentTabIndex)
+            .apply()
+    }
+
+    private fun restoreTabsState() {
+        val prefs = getSharedPreferences("tabs_prefs", MODE_PRIVATE)
+        val raw = prefs.getString("urls", "") ?: ""
+        if (raw.isBlank()) return
+        val urls = raw.split("\u0002").filter { it.isNotBlank() }
+        if (urls.isEmpty()) return
+        for (u in urls) {
+            val webView = WebView(this)
+            configureWebView(webView)
+            val tab = Tab(webView)
+            tabs.add(tab)
+            webView.loadUrl(u)
+        }
+        val savedIndex = prefs.getInt("current", 0)
+        currentTabIndex = if (savedIndex in tabs.indices) savedIndex else 0
+        updateTabsButton()
+    }
+
+    private fun clearSavedTabs() {
+        getSharedPreferences("tabs_prefs", MODE_PRIVATE).edit().clear().apply()
+    }
+
+    // ---------- حفظ واستعادة الملف النشط ----------
+
+    private fun saveActiveFilePath() {
+        val prefs = getSharedPreferences("cyber_prefs", MODE_PRIVATE)
+        if (activeFile != null) {
+            prefs.edit().putString("active_path", activeFile!!.absolutePath).apply()
+        } else {
+            prefs.edit().remove("active_path").apply()
+        }
+    }
+
+    private fun restoreActiveFileIfAny() {
+        val prefs = getSharedPreferences("cyber_prefs", MODE_PRIVATE)
+        val path = prefs.getString("active_path", null) ?: return
+        val file = File(path)
+        if (file.exists()) {
+            activeFile = file
+            val content = try { file.readText() } catch (e: Exception) { "" }
+            cyberEditor.setText(content)
+            cyberEditor.isEnabled = true
+            cyberActiveFileLabel.text = "📄 ${file.name}"
+        } else {
+            prefs.edit().remove("active_path").apply()
         }
     }
 
@@ -385,6 +464,8 @@ class MainActivity : AppCompatActivity() {
                     saveInstalledPackages()
                     refreshPackageList()
                 }
+                cyberInstallPackageButton.isEnabled = true
+                cyberInstallPackageButton.text = "⬇ تثبيت"
                 Toast.makeText(this@MainActivity, "تم تثبيت $name بنجاح", Toast.LENGTH_SHORT).show()
             }
         }
@@ -392,6 +473,8 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun onPackageError(name: String, message: String) {
             runOnUiThread {
+                cyberInstallPackageButton.isEnabled = true
+                cyberInstallPackageButton.text = "⬇ تثبيت"
                 Toast.makeText(this@MainActivity, "فشل تثبيت $name: $message", Toast.LENGTH_LONG).show()
             }
         }
@@ -436,6 +519,8 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "بايثون لسا يتجهز، انتظر شوي", Toast.LENGTH_SHORT).show()
             return
         }
+        cyberInstallPackageButton.isEnabled = false
+        cyberInstallPackageButton.text = "⏳ جاري التثبيت"
         Toast.makeText(this, "جاري تثبيت $name...", Toast.LENGTH_SHORT).show()
         val encodedName = JSONObject.quote(name)
         pyodideWebView.evaluateJavascript("installPackage($encodedName)", null)
@@ -633,6 +718,7 @@ class MainActivity : AppCompatActivity() {
         if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
             isLocked = false
             lockOverlay.visibility = View.GONE
+            updateChromeVisibility()
             return
         }
         val executor = ContextCompat.getMainExecutor(this)
@@ -640,6 +726,7 @@ class MainActivity : AppCompatActivity() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                 isLocked = false
                 lockOverlay.visibility = View.GONE
+                updateChromeVisibility()
             }
         })
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
@@ -654,6 +741,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun emergencyWipeAndClose() {
         wipeEverything()
+        clearSavedTabs()
         isLocked = true
         finishAffinity()
     }
@@ -662,6 +750,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openCyberMode() {
         cyberContainer.visibility = View.VISIBLE
+        updateChromeVisibility()
     }
 
     private fun closeCyberMode() {
@@ -669,6 +758,7 @@ class MainActivity : AppCompatActivity() {
         cyberContainer.visibility = View.GONE
         cyberPanel.visibility = View.GONE
         cyberOpenPanel = null
+        updateChromeVisibility()
     }
 
     private fun toggleCyberPanel(panelKey: String, title: String) {
@@ -778,6 +868,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("حذف") { _: DialogInterface, _: Int ->
                 if (activeFile != null && activeFile?.absolutePath == entry.absolutePath) {
                     activeFile = null
+                    saveActiveFilePath()
                     cyberEditor.setText("")
                     cyberEditor.isEnabled = false
                     cyberActiveFileLabel.text = "لا يوجد ملف مفتوح"
@@ -846,6 +937,7 @@ class MainActivity : AppCompatActivity() {
     private fun openFileInEditor(file: File) {
         saveActiveFileIfNeeded()
         activeFile = file
+        saveActiveFilePath()
         val content = try {
             file.readText()
         } catch (e: Exception) {
@@ -874,11 +966,13 @@ class MainActivity : AppCompatActivity() {
     private fun showHomeScreen() {
         homeScreen.visibility = View.VISIBLE
         browserContainer.visibility = View.GONE
+        updateChromeVisibility()
     }
 
     private fun showBrowserScreen() {
         homeScreen.visibility = View.GONE
         browserContainer.visibility = View.VISIBLE
+        updateChromeVisibility()
     }
 
     private fun onBackButtonPressed() {
@@ -918,6 +1012,9 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createNewTab(url: String) {
+        if (tabs.size >= 8) {
+            Toast.makeText(this, "عندك تبويبات كثيرة، ممكن يتأثر الأداء", Toast.LENGTH_SHORT).show()
+        }
         val webView = WebView(this)
         configureWebView(webView)
         val tab = Tab(webView)
@@ -926,6 +1023,7 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(url)
         switchToTab(currentTabIndex)
         updateTabsButton()
+        saveTabsState()
     }
 
     private fun switchToTab(index: Int) {
@@ -939,6 +1037,7 @@ class MainActivity : AppCompatActivity() {
         )
         urlDisplay.text = tabs[index].webView.url ?: ""
         updateTabsButton()
+        saveTabsState()
     }
 
     private fun closeTab(index: Int) {
@@ -953,6 +1052,7 @@ class MainActivity : AppCompatActivity() {
             switchToTab(currentTabIndex)
         }
         updateTabsButton()
+        saveTabsState()
     }
 
     private fun updateTabsButton() {
@@ -1075,6 +1175,7 @@ class MainActivity : AppCompatActivity() {
                     swipeRefresh.isRefreshing = false
                     urlDisplay.text = url ?: ""
                 }
+                saveTabsState()
             }
 
             override fun onReceivedSslError(
@@ -1125,6 +1226,7 @@ class MainActivity : AppCompatActivity() {
                 browserContainer.visibility = View.GONE
                 window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                updateChromeVisibility()
             }
 
             override fun onHideCustomView() {
@@ -1135,6 +1237,7 @@ class MainActivity : AppCompatActivity() {
                 browserContainer.visibility = View.VISIBLE
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                updateChromeVisibility()
             }
         }
     }
@@ -1435,6 +1538,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        saveTabsState()
+        saveActiveFileIfNeeded()
         wipeEverything()
         for (tab in tabs) tab.webView.destroy()
         super.onDestroy()
