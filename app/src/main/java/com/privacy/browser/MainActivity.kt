@@ -34,13 +34,16 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AlertDialog
 import android.widget.Button
+import android.widget.CompoundButton
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -53,6 +56,7 @@ import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.net.URL
 
 data class Tab(val webView: WebView, var title: String = "تبويب جديد")
 data class Shortcut(val title: String, val url: String)
@@ -149,6 +153,8 @@ class MainActivity : AppCompatActivity() {
         val menuButtonTop: ImageButton = findViewById(R.id.menuButtonTop)
         val downloadsButton: ImageButton = findViewById(R.id.downloadsButton)
         val unlockButton: Button = findViewById(R.id.unlockButton)
+        val protectionSwitch: Switch = findViewById(R.id.protectionSwitch)
+        val protectionLabel: TextView = findViewById(R.id.protectionLabel)
 
         cyberContainer = findViewById(R.id.cyberContainer)
         cyberFab = findViewById(R.id.cyberFab)
@@ -208,6 +214,11 @@ class MainActivity : AppCompatActivity() {
         tabsButton.setOnClickListener { showTabsDialog() }
         unlockButton.setOnClickListener { showLockPrompt() }
 
+        protectionSwitch.setOnCheckedChangeListener { _: CompoundButton, isChecked: Boolean ->
+            adBlockEnabled = isChecked
+            protectionLabel.text = if (isChecked) "الحماية مفعّلة" else "الحماية متوقفة"
+        }
+
         swipeRefresh.setOnRefreshListener { currentWebView()?.reload() }
 
         swipeRefresh.setOnChildScrollUpCallback(object : SwipeRefreshLayout.OnChildScrollUpCallback {
@@ -262,6 +273,48 @@ class MainActivity : AppCompatActivity() {
         cyberEditor.setOnFocusChangeListener { _: View, hasFocus: Boolean ->
             if (!hasFocus) saveActiveFileIfNeeded()
         }
+    }
+
+    // ---------- الأيقونات الحقيقية (Favicons) ----------
+
+    private fun loadFaviconInto(imageView: ImageView, url: String, fallbackTitle: String) {
+        setFallbackLetterIcon(imageView, fallbackTitle)
+        try {
+            val host = Uri.parse(url).host ?: return
+            val faviconUrl = "https://www.google.com/s2/favicons?domain=$host&sz=64"
+            Thread {
+                try {
+                    val input = URL(faviconUrl).openStream()
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(input)
+                    input.close()
+                    if (bitmap != null) {
+                        runOnUiThread {
+                            imageView.setImageBitmap(bitmap)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // يفضل الحرف الاحتياطي كما هو لو فشل التحميل
+                }
+            }.start()
+        } catch (e: Exception) {
+            // يفضل الحرف الاحتياطي كما هو
+        }
+    }
+
+    private fun setFallbackLetterIcon(imageView: ImageView, title: String) {
+        val size = dp(32)
+        val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint()
+        paint.color = android.graphics.Color.parseColor("#4A3A7A")
+        paint.isAntiAlias = true
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.color = android.graphics.Color.WHITE
+        paint.textSize = size * 0.5f
+        paint.textAlign = android.graphics.Paint.Align.CENTER
+        val textY = size / 2f - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(title.take(1).uppercase(), size / 2f, textY, paint)
+        imageView.setImageBitmap(bitmap)
     }
 
     // ---------- بايثون (Pyodide) ----------
@@ -944,6 +997,9 @@ class MainActivity : AppCompatActivity() {
         settings.safeBrowsingEnabled = true
         settings.javaScriptCanOpenWindowsAutomatically = false
         settings.setSupportMultipleWindows(false)
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
@@ -961,19 +1017,21 @@ class MainActivity : AppCompatActivity() {
                     mimeType: String,
                     contentLength: Long
                 ) {
-                    try {
-                        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-                        val request = DownloadManager.Request(Uri.parse(url))
-                        request.setMimeType(mimeType)
-                        request.addRequestHeader("User-Agent", userAgent)
-                        request.setTitle(fileName)
-                        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-                        dm.enqueue(request)
-                        Toast.makeText(this@MainActivity, "بدأ تحميل: $fileName", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(this@MainActivity, "فشل التحميل", Toast.LENGTH_SHORT).show()
+                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                    val dangerousExtensions = setOf(".apk", ".exe", ".bat", ".sh", ".dex")
+                    val isDangerous = dangerousExtensions.any { fileName.lowercase().endsWith(it) }
+
+                    if (isDangerous && adBlockEnabled) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("⚠️ تحذير أمني")
+                            .setMessage("هذا الملف قد يكون خطيرًا (${fileName}). تأكد إن المصدر موثوق قبل المتابعة.")
+                            .setPositiveButton("تحميل على مسؤوليتي") { _: DialogInterface, _: Int ->
+                                startDownload(url, userAgent, contentDisposition, mimeType, fileName)
+                            }
+                            .setNegativeButton("إلغاء", null)
+                            .show()
+                    } else {
+                        startDownload(url, userAgent, contentDisposition, mimeType, fileName)
                     }
                 }
             }
@@ -1078,6 +1136,22 @@ class MainActivity : AppCompatActivity() {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
+        }
+    }
+
+    private fun startDownload(url: String, userAgent: String, contentDisposition: String, mimeType: String, fileName: String) {
+        try {
+            val request = DownloadManager.Request(Uri.parse(url))
+            request.setMimeType(mimeType)
+            request.addRequestHeader("User-Agent", userAgent)
+            request.setTitle(fileName)
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
+            Toast.makeText(this, "بدأ تحميل: $fileName", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل التحميل", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1221,18 +1295,17 @@ class MainActivity : AppCompatActivity() {
         inner.orientation = LinearLayout.VERTICAL
         inner.gravity = android.view.Gravity.CENTER
 
-        val icon = TextView(this)
-        icon.text = shortcut.title.take(1).uppercase()
-        icon.textSize = 22f
-        icon.setTextColor(android.graphics.Color.WHITE)
-        icon.gravity = android.view.Gravity.CENTER
+        val icon = ImageView(this)
+        val iconParams = LinearLayout.LayoutParams(dp(32), dp(32))
+        icon.layoutParams = iconParams
+        loadFaviconInto(icon, shortcut.url, shortcut.title)
 
         val label = TextView(this)
         label.text = shortcut.title.take(10)
         label.textSize = 10f
         label.setTextColor(android.graphics.Color.WHITE)
         label.gravity = android.view.Gravity.CENTER
-        label.setPadding(0, dp(4), 0, 0)
+        label.setPadding(0, dp(6), 0, 0)
 
         inner.addView(icon)
         inner.addView(label)
