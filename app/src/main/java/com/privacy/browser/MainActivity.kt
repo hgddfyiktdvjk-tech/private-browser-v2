@@ -4,6 +4,8 @@ import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -31,7 +33,9 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
+import android.webkit.WebView.FindListener
 import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import android.widget.Button
 import android.widget.CompoundButton
@@ -43,6 +47,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -54,13 +59,24 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class Tab(val webView: WebView, var title: String = "تبويب جديد")
 data class Shortcut(val title: String, val url: String)
 data class Snippet(val title: String, val code: String)
+data class DebugEntry(val time: String, val message: String)
 
 class MainActivity : AppCompatActivity() {
 
@@ -69,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webViewContainer: FrameLayout
     private lateinit var homeSearchBar: EditText
     private lateinit var urlDisplay: TextView
+    private lateinit var urlFavicon: ImageView
     private lateinit var progressBar: ProgressBar
     private lateinit var swipeRefresh: SwipeRefreshLayout
     private lateinit var lockOverlay: FrameLayout
@@ -98,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private var pyodideReady = false
 
     private val terminalBuilder = SpannableStringBuilder()
+    private val debugEntries = mutableListOf<DebugEntry>()
 
     private lateinit var rootDir: File
     private lateinit var currentDir: File
@@ -111,6 +129,7 @@ class MainActivity : AppCompatActivity() {
     private var isLocked = true
     private var adBlockEnabled = true
     private var darkModeEnabled = false
+    private var lastClosedTabUrl: String? = null
 
     private val tabs = mutableListOf<Tab>()
     private var currentTabIndex = -1
@@ -133,6 +152,12 @@ class MainActivity : AppCompatActivity() {
         "trafficjunky.net", "exosrv.com", "propellerclick.com"
     )
 
+    private val importProjectLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) importProjectFromUri(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -142,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         webViewContainer = findViewById(R.id.webViewContainer)
         homeSearchBar = findViewById(R.id.homeSearchBar)
         urlDisplay = findViewById(R.id.urlDisplay)
+        urlFavicon = findViewById(R.id.urlFavicon)
         progressBar = findViewById(R.id.progressBar)
         swipeRefresh = findViewById(R.id.swipeRefresh)
         lockOverlay = findViewById(R.id.lockOverlay)
@@ -178,6 +204,7 @@ class MainActivity : AppCompatActivity() {
         pyodideWebView = findViewById(R.id.pyodideWebView)
 
         val cyberCloseButton: ImageButton = findViewById(R.id.cyberCloseButton)
+        val cyberMenuButton: ImageButton = findViewById(R.id.cyberMenuButton)
         val cyberFilesButton: Button = findViewById(R.id.cyberFilesButton)
         val cyberTerminalButton: Button = findViewById(R.id.cyberTerminalButton)
         val cyberPackagesButton: Button = findViewById(R.id.cyberPackagesButton)
@@ -248,6 +275,7 @@ class MainActivity : AppCompatActivity() {
 
         cyberFab.setOnClickListener { openCyberMode() }
         cyberCloseButton.setOnClickListener { closeCyberMode() }
+        cyberMenuButton.setOnClickListener { showCyberExtraMenu(cyberMenuButton) }
         cyberFilesButton.setOnClickListener { toggleCyberPanel("files", "📁 مدير الملفات") }
         cyberTerminalButton.setOnClickListener { toggleCyberPanel("terminal", "⌨ الترمينال") }
         cyberPackagesButton.setOnClickListener { toggleCyberPanel("packages", "📦 المكتبات") }
@@ -282,7 +310,7 @@ class MainActivity : AppCompatActivity() {
         updateChromeVisibility()
     }
 
-    // ---------- إدارة ظهور الأزرار العائمة (الإصلاح الجديد) ----------
+    // ---------- إدارة ظهور الأزرار العائمة ----------
 
     private fun updateChromeVisibility() {
         val shouldHide = isLocked || customView != null || cyberContainer.visibility == View.VISIBLE
@@ -419,12 +447,24 @@ class MainActivity : AppCompatActivity() {
         cyberTerminalOutput.text = terminalBuilder
     }
 
+    private fun logDebugEntry(message: String) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        debugEntries.add(0, DebugEntry(time, message))
+        if (debugEntries.size > 50) {
+            debugEntries.removeAt(debugEntries.size - 1)
+        }
+    }
+
     private inner class PyBridge {
         @JavascriptInterface
         fun onPyodideReady() {
             runOnUiThread {
                 pyodideReady = true
                 appendTerminal("✅ بايثون جاهز\n", "#00FF41")
+                for (name in installedPackages.toList()) {
+                    val encodedName = JSONObject.quote(name)
+                    pyodideWebView.evaluateJavascript("installPackage($encodedName)", null)
+                }
             }
         }
 
@@ -432,6 +472,7 @@ class MainActivity : AppCompatActivity() {
         fun onPyodideError(message: String) {
             runOnUiThread {
                 appendTerminal("❌ فشل تجهيز بايثون: $message\n", "#FF6B6B")
+                logDebugEntry("فشل تجهيز بايثون: $message")
             }
         }
 
@@ -453,6 +494,7 @@ class MainActivity : AppCompatActivity() {
         fun onPythonError(message: String) {
             runOnUiThread {
                 appendTerminal("\n❌ خطأ: $message\n", "#FF6B6B")
+                logDebugEntry(message)
             }
         }
 
@@ -476,6 +518,7 @@ class MainActivity : AppCompatActivity() {
                 cyberInstallPackageButton.isEnabled = true
                 cyberInstallPackageButton.text = "⬇ تثبيت"
                 Toast.makeText(this@MainActivity, "فشل تثبيت $name: $message", Toast.LENGTH_LONG).show()
+                logDebugEntry("فشل تثبيت $name: $message")
             }
         }
     }
@@ -574,6 +617,7 @@ class MainActivity : AppCompatActivity() {
                 installedPackages.remove(name)
                 saveInstalledPackages()
                 refreshPackageList()
+                Toast.makeText(this, "تمت الإزالة — لن تُحمّل بالمرة الجاية", Toast.LENGTH_SHORT).show()
             }
 
             row.addView(label)
@@ -700,6 +744,240 @@ class MainActivity : AppCompatActivity() {
         cyberPanel.visibility = View.GONE
         cyberOpenPanel = null
         Toast.makeText(this, "تمت إضافة الكود", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- القائمة الإضافية بالوضع السيبراني ----------
+
+    private fun showCyberExtraMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menu.add(0, 1, 0, "🐞 سجل الأخطاء")
+        popup.menu.add(0, 2, 0, "📸 حفظ لقطة من المشروع")
+        popup.menu.add(0, 3, 0, "🕘 استعادة لقطة سابقة")
+        popup.menu.add(0, 4, 0, "📤 تصدير المشروع (ZIP)")
+        popup.menu.add(0, 5, 0, "📥 استيراد مشروع (ZIP)")
+        popup.menu.add(0, 6, 0, "🐍 مرجع بايثون سريع")
+        popup.setOnMenuItemClickListener { item: android.view.MenuItem ->
+            when (item.itemId) {
+                1 -> showDebugLogDialog()
+                2 -> saveSnapshot()
+                3 -> showSnapshotsDialog()
+                4 -> exportProject()
+                5 -> importProjectLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                6 -> showPythonCheatSheet()
+            }
+            true
+        }
+        popup.show()
+    }
+
+    private fun showDebugLogDialog() {
+        if (debugEntries.isEmpty()) {
+            Toast.makeText(this, "لا توجد أخطاء مسجّلة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val listLayout = LinearLayout(this)
+        listLayout.orientation = LinearLayout.VERTICAL
+        listLayout.setPadding(dp(16), dp(8), dp(16), dp(8))
+        for (entry in debugEntries) {
+            val row = TextView(this)
+            row.text = "[${entry.time}] ${entry.message}"
+            row.setTextColor(android.graphics.Color.parseColor("#FF6B6B"))
+            row.textSize = 12f
+            row.setPadding(0, dp(6), 0, dp(6))
+            listLayout.addView(row)
+        }
+        val scroll = ScrollView(this)
+        scroll.addView(listLayout)
+        AlertDialog.Builder(this)
+            .setTitle("🐞 سجل الأخطاء")
+            .setView(scroll)
+            .setPositiveButton("إغلاق", null)
+            .setNegativeButton("مسح السجل") { _: DialogInterface, _: Int ->
+                debugEntries.clear()
+            }
+            .show()
+    }
+
+    private fun showPythonCheatSheet() {
+        val cheatSheetText = """
+            المتغيرات: x = 5
+            نص: s = "hello"
+            قائمة: lst = [1, 2, 3]
+            قاموس: d = {"key": "value"}
+
+            شرط:
+            if x > 0:
+                print("موجب")
+            elif x == 0:
+                print("صفر")
+            else:
+                print("سالب")
+
+            حلقة for:
+            for i in range(5):
+                print(i)
+
+            حلقة while:
+            while x > 0:
+                x -= 1
+
+            دالة:
+            def add(a, b):
+                return a + b
+
+            قراءة ملف:
+            with open("file.txt") as f:
+                content = f.read()
+
+            قاعدة بيانات SQLite (مدعومة تلقائيًا):
+            import sqlite3
+            conn = sqlite3.connect("data.db")
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE t (id INT)")
+        """.trimIndent()
+
+        val textView = TextView(this)
+        textView.text = cheatSheetText
+        textView.textSize = 12f
+        textView.typeface = android.graphics.Typeface.MONOSPACE
+        textView.setPadding(dp(16), dp(16), dp(16), dp(16))
+        val scroll = ScrollView(this)
+        scroll.addView(textView)
+
+        AlertDialog.Builder(this)
+            .setTitle("🐍 مرجع بايثون سريع")
+            .setView(scroll)
+            .setPositiveButton("إغلاق", null)
+            .show()
+    }
+
+    // ---------- لقطات الحفظ (Snapshots) ----------
+
+    private fun saveSnapshot() {
+        try {
+            val snapshotsDir = File(filesDir, "cyber_snapshots")
+            if (!snapshotsDir.exists()) snapshotsDir.mkdirs()
+            val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
+            val target = File(snapshotsDir, timestamp)
+            target.mkdirs()
+            copyDirectoryRecursive(rootDir, target)
+            Toast.makeText(this, "تم حفظ اللقطة: $timestamp", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل حفظ اللقطة", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showSnapshotsDialog() {
+        val snapshotsDir = File(filesDir, "cyber_snapshots")
+        val snapshots = snapshotsDir.listFiles()?.filter { it.isDirectory }?.sortedDescending() ?: emptyList()
+        if (snapshots.isEmpty()) {
+            Toast.makeText(this, "لا توجد لقطات محفوظة", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = snapshots.map { it.name }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("🕘 اختر لقطة للاستعادة")
+            .setItems(names) { _: DialogInterface, which: Int ->
+                confirmRestoreSnapshot(snapshots[which])
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun confirmRestoreSnapshot(snapshotDir: File) {
+        AlertDialog.Builder(this)
+            .setTitle("استعادة لقطة")
+            .setMessage("هذا بيستبدل كل ملفاتك الحالية بمحتوى اللقطة. متأكد؟")
+            .setPositiveButton("استعادة") { _: DialogInterface, _: Int ->
+                try {
+                    rootDir.deleteRecursively()
+                    rootDir.mkdirs()
+                    copyDirectoryRecursive(snapshotDir, rootDir)
+                    currentDir = rootDir
+                    activeFile = null
+                    cyberEditor.setText("")
+                    cyberEditor.isEnabled = false
+                    cyberActiveFileLabel.text = "لا يوجد ملف مفتوح"
+                    saveActiveFilePath()
+                    Toast.makeText(this, "تمت الاستعادة بنجاح", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "فشلت الاستعادة", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun copyDirectoryRecursive(source: File, target: File) {
+        if (source.isDirectory) {
+            if (!target.exists()) target.mkdirs()
+            val children = source.listFiles() ?: return
+            for (child in children) {
+                copyDirectoryRecursive(child, File(target, child.name))
+            }
+        } else {
+            source.copyTo(target, overwrite = true)
+        }
+    }
+
+    // ---------- تصدير / استيراد المشروع (ZIP) ----------
+
+    private fun exportProject() {
+        try {
+            val exportsDir = File(getExternalFilesDir(null), "exports")
+            if (!exportsDir.exists()) exportsDir.mkdirs()
+            val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
+            val zipFile = File(exportsDir, "project_$timestamp.zip")
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos: ZipOutputStream ->
+                zipDirectoryContents(rootDir, rootDir, zos)
+            }
+            Toast.makeText(this, "تم التصدير: ${zipFile.absolutePath}", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل التصدير", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun zipDirectoryContents(baseDir: File, current: File, zos: ZipOutputStream) {
+        val files = current.listFiles() ?: return
+        for (file in files) {
+            val relativePath = file.absolutePath.removePrefix(baseDir.absolutePath + File.separator)
+            if (file.isDirectory) {
+                zipDirectoryContents(baseDir, file, zos)
+            } else {
+                val entry = ZipEntry(relativePath)
+                zos.putNextEntry(entry)
+                BufferedInputStream(FileInputStream(file)).use { input: BufferedInputStream ->
+                    input.copyTo(zos)
+                }
+                zos.closeEntry()
+            }
+        }
+    }
+
+    private fun importProjectFromUri(uri: Uri) {
+        try {
+            val inputStream = contentResolver.openInputStream(uri) ?: return
+            ZipInputStream(BufferedInputStream(inputStream)).use { zis: ZipInputStream ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    val outFile = File(rootDir, entry.name)
+                    if (entry.isDirectory) {
+                        outFile.mkdirs()
+                    } else {
+                        outFile.parentFile?.mkdirs()
+                        BufferedOutputStream(FileOutputStream(outFile)).use { out: BufferedOutputStream ->
+                            zis.copyTo(out)
+                        }
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            currentDir = rootDir
+            Toast.makeText(this, "تم استيراد المشروع بنجاح", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل الاستيراد", Toast.LENGTH_SHORT).show()
+        }
     }
 
     // ---------- القفل ----------
@@ -1035,13 +1313,25 @@ class MainActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
-        urlDisplay.text = tabs[index].webView.url ?: ""
+        val url = tabs[index].webView.url ?: ""
+        urlDisplay.text = url
+        updateUrlFavicon(url)
         updateTabsButton()
         saveTabsState()
     }
 
+    private fun updateUrlFavicon(url: String) {
+        if (url.isBlank()) {
+            urlFavicon.visibility = View.GONE
+            return
+        }
+        urlFavicon.visibility = View.VISIBLE
+        loadFaviconInto(urlFavicon, url, "?")
+    }
+
     private fun closeTab(index: Int) {
         if (index !in tabs.indices) return
+        lastClosedTabUrl = tabs[index].webView.url
         tabs[index].webView.destroy()
         tabs.removeAt(index)
         if (tabs.isEmpty()) {
@@ -1055,6 +1345,16 @@ class MainActivity : AppCompatActivity() {
         saveTabsState()
     }
 
+    private fun reopenLastClosedTab() {
+        val url = lastClosedTabUrl
+        if (url == null || url.isBlank()) {
+            Toast.makeText(this, "لا يوجد تبويب لإعادة فتحه", Toast.LENGTH_SHORT).show()
+            return
+        }
+        createNewTab(url)
+        lastClosedTabUrl = null
+    }
+
     private fun updateTabsButton() {
         tabsButton.text = tabs.size.toString()
     }
@@ -1064,20 +1364,54 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "لا توجد تبويبات مفتوحة", Toast.LENGTH_SHORT).show()
             return
         }
-        val titles = arrayOfNulls<String>(tabs.size)
-        for (i in tabs.indices) titles[i] = tabs[i].title.ifBlank { "تبويب ${i + 1}" }
+        val listLayout = LinearLayout(this)
+        listLayout.orientation = LinearLayout.VERTICAL
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("التبويبات المفتوحة")
-            .setItems(titles) { _: DialogInterface, which: Int ->
-                switchToTab(which)
-                showBrowserScreen()
-            }
+            .setView(buildTabsListView(listLayout))
             .setNeutralButton("+ تبويب جديد") { _: DialogInterface, _: Int ->
                 createNewTab("https://www.google.com")
+                showBrowserScreen()
             }
             .setPositiveButton("إغلاق", null)
-            .show()
+            .create()
+        dialog.show()
+    }
+
+    private fun buildTabsListView(container: LinearLayout): ScrollView {
+        for (i in tabs.indices) {
+            val tab = tabs[i]
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = android.view.Gravity.CENTER_VERTICAL
+            row.setPadding(dp(10), dp(10), dp(10), dp(10))
+
+            val icon = ImageView(this)
+            val iconParams = LinearLayout.LayoutParams(dp(24), dp(24))
+            iconParams.marginEnd = dp(10)
+            icon.layoutParams = iconParams
+            loadFaviconInto(icon, tab.webView.url ?: "", tab.title)
+
+            val label = TextView(this)
+            label.text = tab.title.ifBlank { "تبويب ${i + 1}" }
+            label.textSize = 14f
+            val labelParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            label.layoutParams = labelParams
+
+            row.addView(icon)
+            row.addView(label)
+
+            row.setOnClickListener {
+                switchToTab(i)
+                showBrowserScreen()
+            }
+
+            container.addView(row)
+        }
+        val scroll = ScrollView(this)
+        scroll.addView(container)
+        return scroll
     }
 
     // ---------- إعداد WebView ----------
@@ -1100,6 +1434,9 @@ class MainActivity : AppCompatActivity() {
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+
+        val savedZoom = getSharedPreferences("prefs_general", MODE_PRIVATE).getInt("text_zoom", 100)
+        settings.textZoom = savedZoom
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
@@ -1152,6 +1489,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 if (isBlocked) {
+                    incrementBlockedCount()
                     return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
                 }
                 return super.shouldInterceptRequest(view, request)
@@ -1174,6 +1512,7 @@ class MainActivity : AppCompatActivity() {
                     progressBar.visibility = View.GONE
                     swipeRefresh.isRefreshing = false
                     urlDisplay.text = url ?: ""
+                    updateUrlFavicon(url ?: "")
                 }
                 saveTabsState()
             }
@@ -1240,6 +1579,32 @@ class MainActivity : AppCompatActivity() {
                 updateChromeVisibility()
             }
         }
+
+        webView.setFindListener(object : FindListener {
+            override fun onFindResultReceived(
+                activeMatchOrdinal: Int,
+                numberOfMatches: Int,
+                isDoneCounting: Boolean
+            ) {
+                // النتائج تظهر تلقائيًا بتظليل WebView
+            }
+        })
+    }
+
+    private fun incrementBlockedCount() {
+        val prefs = getSharedPreferences("stats_prefs", MODE_PRIVATE)
+        val current = prefs.getInt("blocked_count", 0)
+        prefs.edit().putInt("blocked_count", current + 1).apply()
+    }
+
+    private fun showPrivacyStats() {
+        val prefs = getSharedPreferences("stats_prefs", MODE_PRIVATE)
+        val count = prefs.getInt("blocked_count", 0)
+        AlertDialog.Builder(this)
+            .setTitle("📊 إحصائيات الحماية")
+            .setMessage("تم حظر $count طلب إعلان أو تتبع منذ تثبيت التطبيق.")
+            .setPositiveButton("إغلاق", null)
+            .show()
     }
 
     private fun startDownload(url: String, userAgent: String, contentDisposition: String, mimeType: String, fileName: String) {
@@ -1264,6 +1629,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- بحث داخل الصفحة ----------
+
+    private fun showFindInPageDialog() {
+        val webView = currentWebView()
+        if (webView == null) {
+            Toast.makeText(this, "افتح صفحة أولاً", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val input = EditText(this)
+        input.hint = "كلمة البحث"
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("🔍 بحث بالصفحة")
+            .setView(input)
+            .setPositiveButton("بحث") { _: DialogInterface, _: Int ->
+                val query = input.text.toString()
+                if (query.isNotBlank()) {
+                    webView.findAllAsync(query)
+                }
+            }
+            .setNeutralButton("التالي") { _: DialogInterface, _: Int ->
+                webView.findNext(true)
+            }
+            .setNegativeButton("إغلاق") { _: DialogInterface, _: Int ->
+                webView.clearMatches()
+            }
+            .create()
+        dialog.show()
+    }
+
+    // ---------- وضع القراءة الأساسي ----------
+
+    private fun activateReaderMode() {
+        val webView = currentWebView() ?: return
+        val js = """
+            (function() {
+                var article = document.querySelector('article') || document.querySelector('main') || document.body;
+                var text = article.innerText;
+                document.body.innerHTML = '<div style="padding:20px;font-size:18px;line-height:1.6;white-space:pre-wrap;">' + text + '</div>';
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js, null)
+        Toast.makeText(this, "تم تفعيل وضع القراءة الأساسي", Toast.LENGTH_SHORT).show()
+    }
+
     // ---------- القائمة ----------
 
     private fun showMainMenu(anchor: View) {
@@ -1271,7 +1681,15 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 1, 0, "📌 إضافة الصفحة الحالية للاختصارات")
         popup.menu.add(0, 2, 0, if (adBlockEnabled) "🚫 حظر الإعلانات: مفعّل" else "🚫 حظر الإعلانات: متوقف")
         popup.menu.add(0, 3, 0, if (darkModeEnabled) "🌙 الوضع الليلي: مفعّل" else "☀️ الوضع الليلي: متوقف")
-        popup.menu.add(0, 4, 0, "🚨 مسح فوري وإغلاق")
+        popup.menu.add(0, 4, 0, "🔗 نسخ الرابط")
+        popup.menu.add(0, 5, 0, "📤 مشاركة الرابط")
+        popup.menu.add(0, 6, 0, "🔍 بحث بالصفحة")
+        popup.menu.add(0, 7, 0, "🔤 تكبير الخط")
+        popup.menu.add(0, 8, 0, "🔡 تصغير الخط")
+        popup.menu.add(0, 9, 0, "📖 وضع القراءة")
+        popup.menu.add(0, 10, 0, "↩️ إعادة فتح آخر تبويب مسكرته")
+        popup.menu.add(0, 11, 0, "📊 إحصائيات الحماية")
+        popup.menu.add(0, 12, 0, "🚨 مسح فوري وإغلاق")
         popup.setOnMenuItemClickListener { item: android.view.MenuItem ->
             when (item.itemId) {
                 1 -> addCurrentPageAsShortcut()
@@ -1286,11 +1704,54 @@ class MainActivity : AppCompatActivity() {
                     val msg = if (darkModeEnabled) "تم تفعيل الوضع الليلي" else "تم إيقاف الوضع الليلي"
                     Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
                 }
-                4 -> emergencyWipeAndClose()
+                4 -> copyCurrentLink()
+                5 -> shareCurrentLink()
+                6 -> showFindInPageDialog()
+                7 -> adjustTextZoom(10)
+                8 -> adjustTextZoom(-10)
+                9 -> activateReaderMode()
+                10 -> reopenLastClosedTab()
+                11 -> showPrivacyStats()
+                12 -> emergencyWipeAndClose()
             }
             true
         }
         popup.show()
+    }
+
+    private fun copyCurrentLink() {
+        val url = currentWebView()?.url
+        if (url.isNullOrBlank()) {
+            Toast.makeText(this, "لا يوجد رابط حاليًا", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("link", url))
+        Toast.makeText(this, "تم نسخ الرابط", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareCurrentLink() {
+        val url = currentWebView()?.url
+        if (url.isNullOrBlank()) {
+            Toast.makeText(this, "لا يوجد رابط حاليًا", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_SEND)
+        intent.type = "text/plain"
+        intent.putExtra(Intent.EXTRA_TEXT, url)
+        startActivity(Intent.createChooser(intent, "مشاركة الرابط"))
+    }
+
+    private fun adjustTextZoom(delta: Int) {
+        val webView = currentWebView()
+        if (webView == null) {
+            Toast.makeText(this, "افتح صفحة أولاً", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val newZoom = (webView.settings.textZoom + delta).coerceIn(50, 200)
+        webView.settings.textZoom = newZoom
+        getSharedPreferences("prefs_general", MODE_PRIVATE).edit().putInt("text_zoom", newZoom).apply()
+        Toast.makeText(this, "حجم الخط: $newZoom%", Toast.LENGTH_SHORT).show()
     }
 
     // ---------- الاختصارات (Speed Dial) ----------
