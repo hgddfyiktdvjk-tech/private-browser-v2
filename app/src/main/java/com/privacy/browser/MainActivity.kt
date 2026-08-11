@@ -9,9 +9,15 @@ import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
@@ -23,8 +29,10 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.JsResult
+import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
@@ -62,21 +70,29 @@ import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.URL
+import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 data class Tab(val webView: WebView, var title: String = "تبويب جديد")
 data class Shortcut(val title: String, val url: String)
 data class Snippet(val title: String, val code: String)
 data class DebugEntry(val time: String, val message: String)
+data class PermLogEntry(val time: String, val host: String, val type: String, val allowed: Boolean)
 
 class MainActivity : AppCompatActivity() {
 
@@ -91,8 +107,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var lockOverlay: FrameLayout
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var gridShortcuts: GridLayout
+    private lateinit var shortcutsScroll: ScrollView
     private lateinit var tabsButton: Button
     private lateinit var bottomBar: LinearLayout
+    private lateinit var protectionToggle: LinearLayout
+    private var focusModeOn = false
 
     private lateinit var cyberContainer: FrameLayout
     private lateinit var cyberFab: ImageButton
@@ -116,10 +135,12 @@ class MainActivity : AppCompatActivity() {
 
     private val terminalBuilder = SpannableStringBuilder()
     private val debugEntries = mutableListOf<DebugEntry>()
+    private val permLogEntries = mutableListOf<PermLogEntry>()
 
     private lateinit var rootDir: File
     private lateinit var currentDir: File
     private var activeFile: File? = null
+    private var lastRunStartTime: Long = 0L
 
     private val installedPackages = mutableListOf<String>()
     private val snippets = mutableListOf<Snippet>()
@@ -129,6 +150,7 @@ class MainActivity : AppCompatActivity() {
     private var isLocked = true
     private var adBlockEnabled = true
     private var darkModeEnabled = false
+    private var paranoiaModeOn = false
     private var lastClosedTabUrl: String? = null
 
     private val tabs = mutableListOf<Tab>()
@@ -152,6 +174,39 @@ class MainActivity : AppCompatActivity() {
         "trafficjunky.net", "exosrv.com", "propellerclick.com"
     )
 
+    private val manualBlacklist = mutableSetOf<String>()
+    private val jsDisabledDomains = mutableSetOf<String>()
+    private var pageBlockedCount = 0
+
+    private val autoLockHandler = Handler(Looper.getMainLooper())
+    private val autoLockRunnable = Runnable { lockNow() }
+    private val autoLockDelayMs = 5 * 60 * 1000L
+
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var lastAccel = floatArrayOf(0f, 0f, 0f)
+    private var accelInitialized = false
+    private val motionSensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (isLocked) return
+            val x = event.values[0]
+            val y = event.values[1]
+            val z = event.values[2]
+            if (!accelInitialized) {
+                lastAccel = floatArrayOf(x, y, z)
+                accelInitialized = true
+                return
+            }
+            val delta = Math.abs(x - lastAccel[0]) + Math.abs(y - lastAccel[1]) + Math.abs(z - lastAccel[2])
+            lastAccel = floatArrayOf(x, y, z)
+            if (delta > 28f) {
+                lockNow()
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
     private val importProjectLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -160,6 +215,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
         homeScreen = findViewById(R.id.homeScreen)
@@ -173,9 +229,12 @@ class MainActivity : AppCompatActivity() {
         lockOverlay = findViewById(R.id.lockOverlay)
         fullscreenContainer = findViewById(R.id.fullscreenContainer)
         gridShortcuts = findViewById(R.id.gridShortcuts)
+        shortcutsScroll = findViewById(R.id.shortcutsScroll)
         tabsButton = findViewById(R.id.tabsButton)
         bottomBar = findViewById(R.id.bottomBar)
+        protectionToggle = findViewById(R.id.protectionToggle)
 
+        val focusModeButton: ImageButton = findViewById(R.id.focusModeButton)
         val backButton: ImageButton = findViewById(R.id.backButton)
         val homeButton: ImageButton = findViewById(R.id.homeButton)
         val menuButton: ImageButton = findViewById(R.id.menuButton)
@@ -223,6 +282,11 @@ class MainActivity : AppCompatActivity() {
         if (!rootDir.exists()) rootDir.mkdirs()
         currentDir = rootDir
 
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        loadManualBlacklist()
+        loadJsDisabledDomains()
         setupPyodideWebView()
         loadInstalledPackages()
         loadSnippets()
@@ -232,6 +296,7 @@ class MainActivity : AppCompatActivity() {
         loadShortcuts()
         rebuildShortcutsGrid()
 
+        focusModeButton.setOnClickListener { toggleFocusMode() }
         backButton.setOnClickListener { onBackButtonPressed() }
         homeButton.setOnClickListener { showHomeScreen() }
         menuButton.setOnClickListener { showMainMenu(menuButton) }
@@ -265,7 +330,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 val query = homeSearchBar.text.toString().trim()
                 if (query.isNotEmpty()) {
-                    openUrlOrSearch(query)
+                    handleSearchBarInput(query)
                 }
                 true
             } else {
@@ -310,13 +375,270 @@ class MainActivity : AppCompatActivity() {
         updateChromeVisibility()
     }
 
-    // ---------- إدارة ظهور الأزرار العائمة ----------
+    override fun onResume() {
+        super.onResume()
+        accelerometer?.let {
+            sensorManager.registerListener(motionSensorListener, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        if (!isLocked) resetAutoLockTimer()
+    }
 
-    private fun updateChromeVisibility() {
-        val shouldHide = isLocked || customView != null || cyberContainer.visibility == View.VISIBLE
-        val visibility = if (shouldHide) View.GONE else View.VISIBLE
-        bottomBar.visibility = visibility
-        cyberFab.visibility = visibility
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(motionSensorListener)
+        autoLockHandler.removeCallbacks(autoLockRunnable)
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (!isLocked) resetAutoLockTimer()
+    }
+
+    private fun resetAutoLockTimer() {
+        autoLockHandler.removeCallbacks(autoLockRunnable)
+        autoLockHandler.postDelayed(autoLockRunnable, autoLockDelayMs)
+    }
+
+    private fun lockNow() {
+        isLocked = true
+        lockOverlay.visibility = View.VISIBLE
+        updateChromeVisibility()
+    }
+
+    // ---------- وضع التركيز ----------
+
+    private fun toggleFocusMode() {
+        focusModeOn = !focusModeOn
+        val visibility = if (focusModeOn) View.GONE else View.VISIBLE
+        protectionToggle.visibility = visibility
+        shortcutsScroll.visibility = visibility
+        Toast.makeText(this, if (focusModeOn) "وضع التركيز مفعّل" else "وضع التركيز متوقف", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- الآلة الحاسبة بشريط البحث ----------
+
+    private fun handleSearchBarInput(query: String) {
+        val mathResult = tryEvaluateMath(query)
+        if (mathResult != null) {
+            AlertDialog.Builder(this)
+                .setTitle("النتيجة")
+                .setMessage("$query = $mathResult")
+                .setPositiveButton("إغلاق", null)
+                .show()
+            return
+        }
+        openUrlOrSearch(query)
+    }
+
+    private fun tryEvaluateMath(input: String): String? {
+        val cleaned = input.replace(" ", "")
+        if (!cleaned.matches(Regex("^[0-9+\\-*/().]+$"))) return null
+        if (!cleaned.any { it == '+' || it == '-' || it == '*' || it == '/' }) return null
+        return try {
+            val result = MathParser(cleaned).parse()
+            if (result == result.toLong().toDouble()) {
+                result.toLong().toString()
+            } else {
+                result.toString()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private class MathParser(private val expr: String) {
+        private var pos = 0
+
+        fun parse(): Double {
+            val result = parseExpression()
+            if (pos != expr.length) throw RuntimeException("Unexpected character")
+            return result
+        }
+
+        private fun parseExpression(): Double {
+            var value = parseTerm()
+            while (pos < expr.length && (expr[pos] == '+' || expr[pos] == '-')) {
+                val op = expr[pos]
+                pos++
+                val next = parseTerm()
+                value = if (op == '+') value + next else value - next
+            }
+            return value
+        }
+
+        private fun parseTerm(): Double {
+            var value = parseFactor()
+            while (pos < expr.length && (expr[pos] == '*' || expr[pos] == '/')) {
+                val op = expr[pos]
+                pos++
+                val next = parseFactor()
+                value = if (op == '*') value * next else value / next
+            }
+            return value
+        }
+
+        private fun parseFactor(): Double {
+            if (pos < expr.length && expr[pos] == '(') {
+                pos++
+                val value = parseExpression()
+                if (pos < expr.length && expr[pos] == ')') pos++
+                return value
+            }
+            if (pos < expr.length && expr[pos] == '-') {
+                pos++
+                return -parseFactor()
+            }
+            val start = pos
+            while (pos < expr.length && (expr[pos].isDigit() || expr[pos] == '.')) pos++
+            if (start == pos) throw RuntimeException("Expected number")
+            return expr.substring(start, pos).toDouble()
+        }
+    }
+
+    // ---------- القائمة السوداء اليدوية ----------
+
+    private fun loadManualBlacklist() {
+        val prefs = getSharedPreferences("blacklist_prefs", MODE_PRIVATE)
+        val raw = prefs.getString("hosts", "") ?: ""
+        manualBlacklist.clear()
+        manualBlacklist.addAll(raw.split("\u0002").filter { it.isNotBlank() })
+    }
+
+    private fun saveManualBlacklist() {
+        val prefs = getSharedPreferences("blacklist_prefs", MODE_PRIVATE)
+        prefs.edit().putString("hosts", manualBlacklist.joinToString("\u0002")).apply()
+    }
+
+    private fun blockCurrentSitePermanently() {
+        val host = currentWebView()?.url?.let { Uri.parse(it).host } ?: return
+        manualBlacklist.add(host)
+        saveManualBlacklist()
+        Toast.makeText(this, "تم حظر $host نهائيًا", Toast.LENGTH_SHORT).show()
+        currentWebView()?.loadUrl("about:blank")
+    }
+
+    private fun showBlacklistDialog() {
+        if (manualBlacklist.isEmpty()) {
+            Toast.makeText(this, "القائمة السوداء فاضية", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = manualBlacklist.toTypedArray()
+        val checked = BooleanArray(names.size)
+        AlertDialog.Builder(this)
+            .setTitle("المواقع المحظورة نهائيًا")
+            .setMultiChoiceItems(names, checked) { _: DialogInterface, which: Int, isChecked: Boolean ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("حذف المحدد") { _: DialogInterface, _: Int ->
+                val toRemove = mutableListOf<String>()
+                for (i in checked.indices) if (checked[i]) toRemove.add(names[i])
+                manualBlacklist.removeAll(toRemove.toSet())
+                saveManualBlacklist()
+            }
+            .setNegativeButton("إغلاق", null)
+            .show()
+    }
+
+    // ---------- تعطيل JS لموقع معين ----------
+
+    private fun loadJsDisabledDomains() {
+        val prefs = getSharedPreferences("js_prefs", MODE_PRIVATE)
+        val raw = prefs.getString("domains", "") ?: ""
+        jsDisabledDomains.clear()
+        jsDisabledDomains.addAll(raw.split("\u0002").filter { it.isNotBlank() })
+    }
+
+    private fun saveJsDisabledDomains() {
+        val prefs = getSharedPreferences("js_prefs", MODE_PRIVATE)
+        prefs.edit().putString("domains", jsDisabledDomains.joinToString("\u0002")).apply()
+    }
+
+    private fun toggleJsForCurrentSite() {
+        val webView = currentWebView() ?: return
+        val host = webView.url?.let { Uri.parse(it).host } ?: return
+        if (jsDisabledDomains.contains(host)) {
+            jsDisabledDomains.remove(host)
+            webView.settings.javaScriptEnabled = true
+            Toast.makeText(this, "تم تفعيل JS لهذا الموقع، جاري إعادة التحميل", Toast.LENGTH_SHORT).show()
+        } else {
+            jsDisabledDomains.add(host)
+            webView.settings.javaScriptEnabled = false
+            Toast.makeText(this, "تم تعطيل JS لهذا الموقع، جاري إعادة التحميل", Toast.LENGTH_SHORT).show()
+        }
+        saveJsDisabledDomains()
+        webView.reload()
+    }
+
+    // ---------- وضع بارانويا ----------
+
+    private fun toggleParanoiaMode() {
+        paranoiaModeOn = !paranoiaModeOn
+        if (paranoiaModeOn) {
+            adBlockEnabled = true
+            CookieManager.getInstance().setAcceptCookie(false)
+            for (tab in tabs) {
+                tab.webView.settings.javaScriptEnabled = false
+                tab.webView.reload()
+            }
+            Toast.makeText(this, "😱 وضع بارانويا مفعّل: أقصى حماية ممكنة", Toast.LENGTH_LONG).show()
+        } else {
+            CookieManager.getInstance().setAcceptCookie(true)
+            for (tab in tabs) {
+                val host = tab.webView.url?.let { Uri.parse(it).host } ?: ""
+                tab.webView.settings.javaScriptEnabled = !jsDisabledDomains.contains(host)
+                tab.webView.reload()
+            }
+            Toast.makeText(this, "تم إيقاف وضع بارانويا", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ---------- إدارة الصلاحيات لكل موقع ----------
+
+    private fun logPermission(host: String, type: String, allowed: Boolean) {
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        permLogEntries.add(0, PermLogEntry(time, host, type, allowed))
+        if (permLogEntries.size > 50) permLogEntries.removeAt(permLogEntries.size - 1)
+    }
+
+    private fun showPermissionLogDialog() {
+        if (permLogEntries.isEmpty()) {
+            Toast.makeText(this, "لا يوجد سجل صلاحيات بعد", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(dp(16), dp(8), dp(16), dp(8))
+        for (entry in permLogEntries) {
+            val row = TextView(this)
+            val status = if (entry.allowed) "✅ سُمح" else "❌ رُفض"
+            row.text = "[${entry.time}] ${entry.host} — ${entry.type} — $status"
+            row.textSize = 12f
+            row.setPadding(0, dp(6), 0, dp(6))
+            layout.addView(row)
+        }
+        val scroll = ScrollView(this)
+        scroll.addView(layout)
+        AlertDialog.Builder(this)
+            .setTitle("🕵️ سجل طلبات الصلاحيات")
+            .setView(scroll)
+            .setPositiveButton("إغلاق", null)
+            .show()
+    }
+
+    private fun requestSitePermission(host: String, type: String, onResult: (Boolean) -> Unit) {
+        AlertDialog.Builder(this)
+            .setTitle("طلب صلاحية")
+            .setMessage("الموقع \"$host\" يطلب صلاحية: $type")
+            .setPositiveButton("سماح") { _: DialogInterface, _: Int ->
+                logPermission(host, type, true)
+                onResult(true)
+            }
+            .setNegativeButton("رفض") { _: DialogInterface, _: Int ->
+                logPermission(host, type, false)
+                onResult(false)
+            }
+            .setCancelable(false)
+            .show()
     }
 
     // ---------- حفظ واستعادة التبويبات ----------
@@ -465,6 +787,18 @@ class MainActivity : AppCompatActivity() {
                     val encodedName = JSONObject.quote(name)
                     pyodideWebView.evaluateJavascript("installPackage($encodedName)", null)
                 }
+                val startupPath = getSharedPreferences("cyber_prefs", MODE_PRIVATE).getString("startup_script", null)
+                if (startupPath != null) {
+                    val startupFile = File(startupPath)
+                    if (startupFile.exists()) {
+                        val code = try { startupFile.readText() } catch (e: Exception) { "" }
+                        if (code.isNotBlank()) {
+                            appendTerminal("\n🚀 تشغيل تلقائي: ${startupFile.name}\n", "#00FF41")
+                            val encoded = JSONObject.quote(code)
+                            pyodideWebView.evaluateJavascript("runPythonCode($encoded)", null)
+                        }
+                    }
+                }
             }
         }
 
@@ -486,7 +820,13 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun onPythonDone() {
             runOnUiThread {
-                appendTerminal("\n✅ انتهى التنفيذ\n", "#00FF41")
+                val elapsed = if (lastRunStartTime > 0) System.currentTimeMillis() - lastRunStartTime else -1
+                if (elapsed >= 0) {
+                    appendTerminal("\n✅ انتهى التنفيذ (${elapsed} مللي ثانية)\n", "#00FF41")
+                } else {
+                    appendTerminal("\n✅ انتهى التنفيذ\n", "#00FF41")
+                }
+                lastRunStartTime = 0
             }
         }
 
@@ -495,6 +835,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 appendTerminal("\n❌ خطأ: $message\n", "#FF6B6B")
                 logDebugEntry(message)
+                lastRunStartTime = 0
             }
         }
 
@@ -536,6 +877,7 @@ class MainActivity : AppCompatActivity() {
         saveActiveFileIfNeeded()
         val code = cyberEditor.text.toString()
         appendTerminal("\n▶ تشغيل: ${file.name}\n", "#00FF41")
+        lastRunStartTime = System.currentTimeMillis()
         val encodedCode = JSONObject.quote(code)
         pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
     }
@@ -548,6 +890,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         appendTerminal("\n>>> $command\n", "#00FF41")
+        lastRunStartTime = System.currentTimeMillis()
         val encodedCode = JSONObject.quote(command)
         pyodideWebView.evaluateJavascript("runPythonCode($encodedCode)", null)
         input.setText("")
@@ -756,6 +1099,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 0, "📤 تصدير المشروع (ZIP)")
         popup.menu.add(0, 5, 0, "📥 استيراد مشروع (ZIP)")
         popup.menu.add(0, 6, 0, "🐍 مرجع بايثون سريع")
+        popup.menu.add(0, 7, 0, "🚀 تعيين ملف تشغيل تلقائي")
         popup.setOnMenuItemClickListener { item: android.view.MenuItem ->
             when (item.itemId) {
                 1 -> showDebugLogDialog()
@@ -764,10 +1108,22 @@ class MainActivity : AppCompatActivity() {
                 4 -> exportProject()
                 5 -> importProjectLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
                 6 -> showPythonCheatSheet()
+                7 -> setStartupScript()
             }
             true
         }
         popup.show()
+    }
+
+    private fun setStartupScript() {
+        val file = activeFile
+        if (file == null) {
+            Toast.makeText(this, "افتح ملف أولاً لتعيينه كملف بدء تشغيل", Toast.LENGTH_SHORT).show()
+            return
+        }
+        getSharedPreferences("cyber_prefs", MODE_PRIVATE).edit()
+            .putString("startup_script", file.absolutePath).apply()
+        Toast.makeText(this, "تم تعيين ${file.name} ليشتغل تلقائيًا", Toast.LENGTH_SHORT).show()
     }
 
     private fun showDebugLogDialog() {
@@ -851,6 +1207,116 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ---------- تشفير ملف بكلمة سر خاصة ----------
+
+    private fun deriveKeyFromPassword(password: String, salt: ByteArray): SecretKeySpec {
+        val spec = PBEKeySpec(password.toCharArray(), salt, 10000, 256)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val keyBytes = factory.generateSecret(spec).encoded
+        return SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun encryptFileWithPassword(file: File, password: String) {
+        val plainBytes = file.readBytes()
+        val salt = ByteArray(16)
+        val iv = ByteArray(16)
+        SecureRandom().nextBytes(salt)
+        SecureRandom().nextBytes(iv)
+        val key = deriveKeyFromPassword(password, salt)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
+        val encrypted = cipher.doFinal(plainBytes)
+
+        val output = ByteArrayOutputStream()
+        output.write(salt)
+        output.write(iv)
+        output.write(encrypted)
+
+        val lockedFile = File(file.parentFile, file.name + ".locked")
+        lockedFile.writeBytes(output.toByteArray())
+        file.delete()
+    }
+
+    private fun decryptFileWithPassword(lockedFile: File, password: String): Boolean {
+        return try {
+            val allBytes = lockedFile.readBytes()
+            val salt = allBytes.copyOfRange(0, 16)
+            val iv = allBytes.copyOfRange(16, 32)
+            val cipherBytes = allBytes.copyOfRange(32, allBytes.size)
+            val key = deriveKeyFromPassword(password, salt)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(iv))
+            val decrypted = cipher.doFinal(cipherBytes)
+
+            val originalName = lockedFile.name.removeSuffix(".locked")
+            val originalFile = File(lockedFile.parentFile, originalName)
+            originalFile.writeBytes(decrypted)
+            lockedFile.delete()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun showEncryptFileDialog(file: File) {
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10))
+        val pass1 = EditText(this)
+        pass1.hint = "كلمة السر"
+        pass1.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        val pass2 = EditText(this)
+        pass2.hint = "تأكيد كلمة السر"
+        pass2.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        layout.addView(pass1)
+        layout.addView(pass2)
+
+        AlertDialog.Builder(this)
+            .setTitle("🔒 تشفير ${file.name}")
+            .setView(layout)
+            .setPositiveButton("تشفير") { _: DialogInterface, _: Int ->
+                val p1 = pass1.text.toString()
+                val p2 = pass2.text.toString()
+                if (p1.isEmpty() || p1 != p2) {
+                    Toast.makeText(this, "كلمتا السر غير متطابقتين", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (activeFile?.absolutePath == file.absolutePath) {
+                    activeFile = null
+                    cyberEditor.setText("")
+                    cyberEditor.isEnabled = false
+                    cyberActiveFileLabel.text = "لا يوجد ملف مفتوح"
+                    saveActiveFilePath()
+                }
+                encryptFileWithPassword(file, p1)
+                refreshFileList()
+                Toast.makeText(this, "تم التشفير", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun showDecryptFileDialog(file: File) {
+        val input = EditText(this)
+        input.hint = "كلمة السر"
+        input.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        AlertDialog.Builder(this)
+            .setTitle("🔓 فك تشفير ${file.name}")
+            .setView(input)
+            .setPositiveButton("فك التشفير") { _: DialogInterface, _: Int ->
+                val password = input.text.toString()
+                val success = decryptFileWithPassword(file, password)
+                if (success) {
+                    Toast.makeText(this, "تم فك التشفير بنجاح", Toast.LENGTH_SHORT).show()
+                    refreshFileList()
+                } else {
+                    Toast.makeText(this, "كلمة السر غير صحيحة", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
     // ---------- لقطات الحفظ (Snapshots) ----------
 
     private fun saveSnapshot() {
@@ -923,15 +1389,54 @@ class MainActivity : AppCompatActivity() {
     // ---------- تصدير / استيراد المشروع (ZIP) ----------
 
     private fun exportProject() {
+        val input = EditText(this)
+        input.hint = "كلمة سر للحماية (اختياري، اتركه فاضي بدون تشفير)"
+        input.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        AlertDialog.Builder(this)
+            .setTitle("📤 تصدير المشروع")
+            .setView(input)
+            .setPositiveButton("تصدير") { _: DialogInterface, _: Int ->
+                doExportProject(input.text.toString())
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun doExportProject(password: String) {
         try {
             val exportsDir = File(getExternalFilesDir(null), "exports")
             if (!exportsDir.exists()) exportsDir.mkdirs()
             val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
-            val zipFile = File(exportsDir, "project_$timestamp.zip")
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile))).use { zos: ZipOutputStream ->
+
+            val zipBytesOutput = ByteArrayOutputStream()
+            ZipOutputStream(BufferedOutputStream(zipBytesOutput)).use { zos: ZipOutputStream ->
                 zipDirectoryContents(rootDir, rootDir, zos)
             }
-            Toast.makeText(this, "تم التصدير: ${zipFile.absolutePath}", Toast.LENGTH_LONG).show()
+            val zipBytes = zipBytesOutput.toByteArray()
+
+            if (password.isBlank()) {
+                val zipFile = File(exportsDir, "project_$timestamp.zip")
+                zipFile.writeBytes(zipBytes)
+                Toast.makeText(this, "تم التصدير: ${zipFile.absolutePath}", Toast.LENGTH_LONG).show()
+            } else {
+                val salt = ByteArray(16)
+                val iv = ByteArray(16)
+                SecureRandom().nextBytes(salt)
+                SecureRandom().nextBytes(iv)
+                val key = deriveKeyFromPassword(password, salt)
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
+                val encrypted = cipher.doFinal(zipBytes)
+
+                val output = ByteArrayOutputStream()
+                output.write(salt)
+                output.write(iv)
+                output.write(encrypted)
+
+                val encFile = File(exportsDir, "project_$timestamp.zip.enc")
+                encFile.writeBytes(output.toByteArray())
+                Toast.makeText(this, "تم التصدير المشفّر: ${encFile.absolutePath}", Toast.LENGTH_LONG).show()
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "فشل التصدير", Toast.LENGTH_SHORT).show()
         }
@@ -955,29 +1460,71 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun importProjectFromUri(uri: Uri) {
+        val path = uri.path ?: ""
+        if (path.endsWith(".enc")) {
+            val input = EditText(this)
+            input.hint = "كلمة السر"
+            input.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            AlertDialog.Builder(this)
+                .setTitle("استيراد مشروع مشفّر")
+                .setView(input)
+                .setPositiveButton("استيراد") { _: DialogInterface, _: Int ->
+                    importEncryptedProject(uri, input.text.toString())
+                }
+                .setNegativeButton("إلغاء", null)
+                .show()
+        } else {
+            importPlainProject(uri)
+        }
+    }
+
+    private fun importPlainProject(uri: Uri) {
         try {
             val inputStream = contentResolver.openInputStream(uri) ?: return
-            ZipInputStream(BufferedInputStream(inputStream)).use { zis: ZipInputStream ->
-                var entry: ZipEntry? = zis.nextEntry
-                while (entry != null) {
-                    val outFile = File(rootDir, entry.name)
-                    if (entry.isDirectory) {
-                        outFile.mkdirs()
-                    } else {
-                        outFile.parentFile?.mkdirs()
-                        BufferedOutputStream(FileOutputStream(outFile)).use { out: BufferedOutputStream ->
-                            zis.copyTo(out)
-                        }
-                    }
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                }
-            }
-            currentDir = rootDir
+            unzipStreamToRoot(BufferedInputStream(inputStream))
             Toast.makeText(this, "تم استيراد المشروع بنجاح", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "فشل الاستيراد", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun importEncryptedProject(uri: Uri, password: String) {
+        try {
+            val inputStream = contentResolver.openInputStream(uri) ?: return
+            val allBytes = inputStream.readBytes()
+            inputStream.close()
+            val salt = allBytes.copyOfRange(0, 16)
+            val iv = allBytes.copyOfRange(16, 32)
+            val cipherBytes = allBytes.copyOfRange(32, allBytes.size)
+            val key = deriveKeyFromPassword(password, salt)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(iv))
+            val zipBytes = cipher.doFinal(cipherBytes)
+            unzipStreamToRoot(BufferedInputStream(ByteArrayInputStream(zipBytes)))
+            Toast.makeText(this, "تم استيراد المشروع بنجاح", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "فشل الاستيراد — تأكد من كلمة السر", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun unzipStreamToRoot(inputStream: BufferedInputStream) {
+        ZipInputStream(inputStream).use { zis: ZipInputStream ->
+            var entry: ZipEntry? = zis.nextEntry
+            while (entry != null) {
+                val outFile = File(rootDir, entry.name)
+                if (entry.isDirectory) {
+                    outFile.mkdirs()
+                } else {
+                    outFile.parentFile?.mkdirs()
+                    BufferedOutputStream(FileOutputStream(outFile)).use { out: BufferedOutputStream ->
+                        zis.copyTo(out)
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
+        currentDir = rootDir
     }
 
     // ---------- القفل ----------
@@ -997,6 +1544,7 @@ class MainActivity : AppCompatActivity() {
             isLocked = false
             lockOverlay.visibility = View.GONE
             updateChromeVisibility()
+            resetAutoLockTimer()
             return
         }
         val executor = ContextCompat.getMainExecutor(this)
@@ -1005,6 +1553,7 @@ class MainActivity : AppCompatActivity() {
                 isLocked = false
                 lockOverlay.visibility = View.GONE
                 updateChromeVisibility()
+                resetAutoLockTimer()
             }
         })
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
@@ -1116,23 +1665,40 @@ class MainActivity : AppCompatActivity() {
         val nameParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         name.layoutParams = nameParams
 
+        row.addView(icon)
+        row.addView(name)
+
+        if (!isDir) {
+            val lockBtn = TextView(this)
+            lockBtn.text = if (entry.name.endsWith(".locked")) "🔓" else "🔒"
+            lockBtn.textSize = 14f
+            lockBtn.setPadding(dp(8), 0, dp(4), 0)
+            lockBtn.setOnClickListener {
+                if (entry.name.endsWith(".locked")) {
+                    showDecryptFileDialog(entry)
+                } else {
+                    showEncryptFileDialog(entry)
+                }
+            }
+            row.addView(lockBtn)
+        }
+
         val delete = TextView(this)
         delete.text = "✕"
         delete.setTextColor(android.graphics.Color.parseColor("#FF6B6B"))
         delete.textSize = 14f
         delete.setPadding(dp(12), 0, dp(4), 0)
         delete.setOnClickListener { confirmDeleteEntry(entry) }
-
-        row.addView(icon)
-        row.addView(name)
         row.addView(delete)
 
         row.setOnClickListener {
             if (isDir) {
                 currentDir = entry
                 refreshFileList()
-            } else {
+            } else if (!entry.name.endsWith(".locked")) {
                 openFileInEditor(entry)
+            } else {
+                Toast.makeText(this, "الملف مشفّر، اضغط 🔓 لفك التشفير أولاً", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -1278,6 +1844,7 @@ class MainActivity : AppCompatActivity() {
             createNewTab(finalUrl)
         } else {
             currentWebView()?.loadUrl(finalUrl)
+            switchToTab(currentTabIndex)
         }
         showBrowserScreen()
     }
@@ -1475,6 +2042,21 @@ class MainActivity : AppCompatActivity() {
         )
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                val host = request?.url?.host ?: return false
+                if (manualBlacklist.contains(host)) {
+                    view?.loadData(
+                        "<html><body style='background:#0B0714;color:#FF6B6B;font-family:sans-serif;padding:40px;text-align:center;'><h2>⛔ هذا الموقع محظور</h2></body></html>",
+                        "text/html", "UTF-8"
+                    )
+                    return true
+                }
+                return false
+            }
+
             override fun shouldInterceptRequest(
                 view: WebView?,
                 request: WebResourceRequest?
@@ -1497,12 +2079,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                if (view == currentWebView()) progressBar.visibility = View.VISIBLE
+                if (view == currentWebView()) {
+                    progressBar.visibility = View.VISIBLE
+                    pageBlockedCount = 0
+                }
                 if (url != null) {
                     val uri = Uri.parse(url)
                     if (uri.scheme == "http") {
                         Toast.makeText(this@MainActivity, "⚠️ هذا الموقع غير آمن (HTTP)", Toast.LENGTH_SHORT).show()
                     }
+                    val host = uri.host ?: ""
+                    view?.settings?.javaScriptEnabled = !jsDisabledDomains.contains(host)
                 }
             }
 
@@ -1549,6 +2136,29 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                val host = Uri.parse(request.origin.toString()).host ?: request.origin.toString()
+                requestSitePermission(host, "كاميرا/ميكروفون") { allowed: Boolean ->
+                    if (allowed) {
+                        request.grant(request.resources)
+                    } else {
+                        request.deny()
+                    }
+                }
+            }
+
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                if (origin == null || callback == null) return
+                val host = Uri.parse(origin).host ?: origin
+                requestSitePermission(host, "الموقع الجغرافي") { allowed: Boolean ->
+                    callback.invoke(origin, allowed, false)
+                }
+            }
+
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                 if (customView != null) {
                     callback?.onCustomViewHidden()
@@ -1592,6 +2202,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun incrementBlockedCount() {
+        pageBlockedCount++
         val prefs = getSharedPreferences("stats_prefs", MODE_PRIVATE)
         val current = prefs.getInt("blocked_count", 0)
         prefs.edit().putInt("blocked_count", current + 1).apply()
@@ -1602,7 +2213,7 @@ class MainActivity : AppCompatActivity() {
         val count = prefs.getInt("blocked_count", 0)
         AlertDialog.Builder(this)
             .setTitle("📊 إحصائيات الحماية")
-            .setMessage("تم حظر $count طلب إعلان أو تتبع منذ تثبيت التطبيق.")
+            .setMessage("تم حظر $count طلب إعلان أو تتبع منذ تثبيت التطبيق.\n\nبهذه الصفحة تحديدًا: $pageBlockedCount محاولة تتبع.")
             .setPositiveButton("إغلاق", null)
             .show()
     }
@@ -1689,7 +2300,12 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 9, 0, "📖 وضع القراءة")
         popup.menu.add(0, 10, 0, "↩️ إعادة فتح آخر تبويب مسكرته")
         popup.menu.add(0, 11, 0, "📊 إحصائيات الحماية")
-        popup.menu.add(0, 12, 0, "🚨 مسح فوري وإغلاق")
+        popup.menu.add(0, 12, 0, "🚫 حظر هذا الموقع نهائيًا")
+        popup.menu.add(0, 13, 0, "📋 عرض المواقع المحظورة")
+        popup.menu.add(0, 14, 0, if (jsDisabledDomains.isEmpty()) "🔧 تعطيل JS لهذا الموقع" else "🔧 تبديل حالة JS لهذا الموقع")
+        popup.menu.add(0, 15, 0, "🕵️ سجل طلبات الصلاحيات")
+        popup.menu.add(0, 16, 0, if (paranoiaModeOn) "😱 إيقاف وضع بارانويا" else "😱 تفعيل وضع بارانويا")
+        popup.menu.add(0, 17, 0, "🚨 مسح فوري وإغلاق")
         popup.setOnMenuItemClickListener { item: android.view.MenuItem ->
             when (item.itemId) {
                 1 -> addCurrentPageAsShortcut()
@@ -1712,7 +2328,12 @@ class MainActivity : AppCompatActivity() {
                 9 -> activateReaderMode()
                 10 -> reopenLastClosedTab()
                 11 -> showPrivacyStats()
-                12 -> emergencyWipeAndClose()
+                12 -> blockCurrentSitePermanently()
+                13 -> showBlacklistDialog()
+                14 -> toggleJsForCurrentSite()
+                15 -> showPermissionLogDialog()
+                16 -> toggleParanoiaMode()
+                17 -> emergencyWipeAndClose()
             }
             true
         }
@@ -1895,119 +2516,4 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(
             inner,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-        container.addView(removeBtn)
-
-        container.setOnClickListener {
-            openUrlOrSearch(shortcut.url)
-        }
-
-        container.setOnLongClickListener { view: View ->
-            val clipData = ClipData.newPlainText("index", index.toString())
-            val shadow = View.DragShadowBuilder(view)
-            view.startDragAndDrop(clipData, shadow, null, 0)
-            true
-        }
-
-        return container
-    }
-
-    private fun createAddTile(): View {
-        val container = FrameLayout(this)
-        container.setBackgroundResource(R.drawable.bg_tile_v2)
-
-        val label = TextView(this)
-        label.text = "+"
-        label.textSize = 28f
-        label.setTextColor(android.graphics.Color.WHITE)
-        label.gravity = android.view.Gravity.CENTER
-
-        container.addView(
-            label,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        container.setOnClickListener { showAddShortcutDialog() }
-        return container
-    }
-
-    private fun showAddShortcutDialog() {
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(dp(20), dp(10), dp(20), dp(10))
-
-        val titleInput = EditText(this)
-        titleInput.hint = "اسم الاختصار"
-
-        val urlInput = EditText(this)
-        urlInput.hint = "الرابط (مثال: example.com)"
-
-        layout.addView(titleInput)
-        layout.addView(urlInput)
-
-        AlertDialog.Builder(this)
-            .setTitle("إضافة اختصار جديد")
-            .setView(layout)
-            .setPositiveButton("إضافة") { _: DialogInterface, _: Int ->
-                val title = titleInput.text.toString().trim()
-                var url = urlInput.text.toString().trim()
-                if (title.isEmpty() || url.isEmpty()) {
-                    Toast.makeText(this, "الرجاء تعبئة الحقلين", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                if (!url.startsWith("http")) url = "https://$url"
-                shortcuts.add(Shortcut(title, url))
-                saveShortcuts()
-                rebuildShortcutsGrid()
-            }
-            .setNegativeButton("إلغاء", null)
-            .show()
-    }
-
-    private fun addCurrentPageAsShortcut() {
-        val webView = currentWebView()
-        if (webView == null) {
-            Toast.makeText(this, "لا يوجد تبويب مفتوح", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val url = webView.url ?: return
-        val title = tabs.getOrNull(currentTabIndex)?.title?.ifBlank { url } ?: url
-        shortcuts.add(Shortcut(title.take(15), url))
-        saveShortcuts()
-        rebuildShortcutsGrid()
-        Toast.makeText(this, "تمت الإضافة للاختصارات", Toast.LENGTH_SHORT).show()
-    }
-
-    // ---------- المسح ----------
-
-    private fun wipeEverything() {
-        for (tab in tabs) {
-            tab.webView.clearHistory()
-            tab.webView.clearCache(true)
-            tab.webView.clearFormData()
-        }
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
-    }
-
-    override fun onDestroy() {
-        saveTabsState()
-        saveActiveFileIfNeeded()
-        wipeEverything()
-        for (tab in tabs) tab.webView.destroy()
-        super.onDestroy()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        onBackButtonPressed()
-    }
-}
+            
