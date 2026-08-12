@@ -2606,29 +2606,32 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "تمت الإضافة للاختصارات", Toast.LENGTH_SHORT).show()
     }
 
-    // ---------- المسح ----------
+// ---------- المسح ----------
 
-    private fun wipeEverything() {
-        for (tab in tabs) {
-            tab.webView.clearHistory()
-            tab.webView.clearCache(true)
-            tab.webView.clearFormData()
-        }
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
+private fun wipeEverything() {
+    for (tab in tabs) {
+        tab.webView.clearHistory()
+        tab.webView.clearCache(true)
+        tab.webView.clearFormData()
     }
+    CookieManager.getInstance().removeAllCookies(null)
+    CookieManager.getInstance().flush()
+    WebStorage.getInstance().deleteAllData()
+}
 
-    override fun onDestroy() {
-        saveTabsState()
-        saveActiveFileIfNeeded()
-        wipeEverything()
-        for (tab in tabs) tab.webView.destroy()
-        super.onDestroy()
-    }
+private fun updateChromeVisibility() {
+}
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        onBackButtonPressed()
-    }
+override fun onDestroy() {
+    saveTabsState()
+    saveActiveFileIfNeeded()
+    wipeEverything()
+    for (tab in tabs) tab.webView.destroy()
+    super.onDestroy()
+}
+
+@Deprecated("Deprecated in Java")
+override fun onBackPressed() {
+    onBackButtonPressed()
+}
 }
