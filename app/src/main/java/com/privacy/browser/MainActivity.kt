@@ -2516,4 +2516,119 @@ class MainActivity : AppCompatActivity() {
 
         container.addView(
             inner,
-            
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        container.addView(removeBtn)
+
+        container.setOnClickListener {
+            openUrlOrSearch(shortcut.url)
+        }
+
+        container.setOnLongClickListener { view: View ->
+            val clipData = ClipData.newPlainText("index", index.toString())
+            val shadow = View.DragShadowBuilder(view)
+            view.startDragAndDrop(clipData, shadow, null, 0)
+            true
+        }
+
+        return container
+    }
+
+    private fun createAddTile(): View {
+        val container = FrameLayout(this)
+        container.setBackgroundResource(R.drawable.bg_tile_v2)
+
+        val label = TextView(this)
+        label.text = "+"
+        label.textSize = 28f
+        label.setTextColor(android.graphics.Color.WHITE)
+        label.gravity = android.view.Gravity.CENTER
+
+        container.addView(
+            label,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        container.setOnClickListener { showAddShortcutDialog() }
+        return container
+    }
+
+    private fun showAddShortcutDialog() {
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10))
+
+        val titleInput = EditText(this)
+        titleInput.hint = "اسم الاختصار"
+
+        val urlInput = EditText(this)
+        urlInput.hint = "الرابط (مثال: example.com)"
+
+        layout.addView(titleInput)
+        layout.addView(urlInput)
+
+        AlertDialog.Builder(this)
+            .setTitle("إضافة اختصار جديد")
+            .setView(layout)
+            .setPositiveButton("إضافة") { _: DialogInterface, _: Int ->
+                val title = titleInput.text.toString().trim()
+                var url = urlInput.text.toString().trim()
+                if (title.isEmpty() || url.isEmpty()) {
+                    Toast.makeText(this, "الرجاء تعبئة الحقلين", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                if (!url.startsWith("http")) url = "https://$url"
+                shortcuts.add(Shortcut(title, url))
+                saveShortcuts()
+                rebuildShortcutsGrid()
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
+    private fun addCurrentPageAsShortcut() {
+        val webView = currentWebView()
+        if (webView == null) {
+            Toast.makeText(this, "لا يوجد تبويب مفتوح", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val url = webView.url ?: return
+        val title = tabs.getOrNull(currentTabIndex)?.title?.ifBlank { url } ?: url
+        shortcuts.add(Shortcut(title.take(15), url))
+        saveShortcuts()
+        rebuildShortcutsGrid()
+        Toast.makeText(this, "تمت الإضافة للاختصارات", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- المسح ----------
+
+    private fun wipeEverything() {
+        for (tab in tabs) {
+            tab.webView.clearHistory()
+            tab.webView.clearCache(true)
+            tab.webView.clearFormData()
+        }
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        WebStorage.getInstance().deleteAllData()
+    }
+
+    override fun onDestroy() {
+        saveTabsState()
+        saveActiveFileIfNeeded()
+        wipeEverything()
+        for (tab in tabs) tab.webView.destroy()
+        super.onDestroy()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        onBackButtonPressed()
+    }
+}
