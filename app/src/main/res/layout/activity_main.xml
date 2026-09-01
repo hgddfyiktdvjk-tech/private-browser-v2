@@ -7,7 +7,7 @@
         android:id="@+id/homeScreen"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@drawable/bg_gradient_v2">
+        android:background="@drawable/bg_ios_black">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -19,7 +19,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="24dp"
+                android:layout_marginHorizontal="20dp"
                 android:layout_marginBottom="16dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
@@ -30,13 +30,13 @@
                     android:layout_weight="1"
                     android:text="متصفحك الخاص"
                     android:textColor="#FFFFFF"
-                    android:textSize="22sp"
+                    android:textSize="28sp"
                     android:textStyle="bold" />
 
                 <ImageButton
                     android:id="@+id/focusModeButton"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
+                    android:layout_width="34dp"
+                    android:layout_height="34dp"
                     android:background="@drawable/bg_bottom_button_ripple"
                     android:padding="6dp"
                     android:scaleType="fitCenter"
@@ -47,21 +47,21 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="20dp"
-                android:layout_marginBottom="14dp"
-                android:background="@drawable/bg_search_bar_v2"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="16dp"
+                android:background="@drawable/bg_search_bar_ios"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingHorizontal="18dp"
-                android:paddingVertical="14dp"
-                android:elevation="4dp">
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="12dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="🔍"
-                    android:textSize="18sp"
-                    android:layout_marginEnd="10dp" />
+                    android:textSize="15sp"
+                    android:layout_marginEnd="8dp"
+                    android:alpha="0.6" />
 
                 <EditText
                     android:id="@+id/homeSearchBar"
@@ -69,10 +69,10 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:background="@null"
-                    android:hint="ابحث، اكتب رابط، أو عملية حسابية"
+                    android:hint="ابحث أو اكتب رابط"
                     android:textColor="#FFFFFF"
-                    android:textColorHint="#99FFFFFF"
-                    android:textSize="15sp"
+                    android:textColorHint="#8D8D93"
+                    android:textSize="16sp"
                     android:imeOptions="actionGo"
                     android:inputType="textUri"
                     android:singleLine="true" />
@@ -82,21 +82,20 @@
                 android:id="@+id/protectionToggle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="20dp"
-                android:layout_marginBottom="22dp"
-                android:background="@drawable/bg_tile_v2"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginBottom="20dp"
+                android:background="@drawable/bg_ios_row"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp"
-                android:elevation="3dp">
+                android:paddingVertical="12dp">
 
                 <TextView
                     android:id="@+id/protectionIcon"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="🛡️"
-                    android:textSize="22sp"
+                    android:textSize="20sp"
                     android:layout_marginEnd="12dp" />
 
                 <LinearLayout
@@ -111,15 +110,14 @@
                         android:layout_height="wrap_content"
                         android:text="الحماية مفعّلة"
                         android:textColor="#FFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textSize="15sp" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="حظر إعلانات، تتبع، ومواقع خطرة"
-                        android:textColor="#99FFFFFF"
-                        android:textSize="11sp"
+                        android:textColor="#8D8D93"
+                        android:textSize="12sp"
                         android:layout_marginTop="2dp" />
                 </LinearLayout>
 
@@ -141,7 +139,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:columnCount="4"
-                    android:padding="14dp" />
+                    android:padding="10dp" />
             </ScrollView>
 
         </LinearLayout>
@@ -162,16 +160,15 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:background="@drawable/bg_top_bar_v2"
+                android:background="@drawable/bg_top_bar_ios"
                 android:paddingHorizontal="16dp"
                 android:paddingVertical="12dp"
-                android:gravity="center_vertical"
-                android:elevation="3dp">
+                android:gravity="center_vertical">
 
                 <ImageView
                     android:id="@+id/urlFavicon"
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
                     android:layout_marginEnd="8dp"
                     android:visibility="gone" />
 
@@ -180,16 +177,17 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:textColor="#FFFFFF"
+                    android:textColor="#8D8D93"
                     android:textSize="13sp"
                     android:singleLine="true"
                     android:ellipsize="middle"
+                    android:gravity="center"
                     android:text="" />
 
                 <ImageButton
                     android:id="@+id/menuButtonTop"
-                    android:layout_width="42dp"
-                    android:layout_height="42dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
                     android:background="@drawable/bg_bottom_button_ripple"
                     android:padding="9dp"
                     android:scaleType="fitCenter"
@@ -201,9 +199,10 @@
                 android:id="@+id/progressBar"
                 style="?android:attr/progressBarStyleHorizontal"
                 android:layout_width="match_parent"
-                android:layout_height="3dp"
+                android:layout_height="2dp"
                 android:max="100"
-                android:visibility="gone" />
+                android:visibility="gone"
+                android:progressTint="#0A84FF" />
 
             <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
                 android:id="@+id/swipeRefresh"
@@ -225,16 +224,15 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="horizontal"
-        android:background="@drawable/bg_bottom_bar_v2"
-        android:paddingVertical="14dp"
-        android:paddingHorizontal="8dp"
-        android:gravity="center"
-        android:elevation="10dp">
+        android:background="@drawable/bg_bottom_bar_ios"
+        android:paddingVertical="12dp"
+        android:paddingHorizontal="4dp"
+        android:gravity="center">
 
         <ImageButton
             android:id="@+id/backButton"
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
             android:padding="12dp"
@@ -245,7 +243,7 @@
         <ImageButton
             android:id="@+id/homeButton"
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
             android:padding="12dp"
@@ -256,7 +254,7 @@
         <ImageButton
             android:id="@+id/menuButton"
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
             android:padding="12dp"
@@ -267,7 +265,7 @@
         <ImageButton
             android:id="@+id/downloadsButton"
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
             android:padding="12dp"
@@ -278,10 +276,10 @@
         <Button
             android:id="@+id/tabsButton"
             android:layout_width="0dp"
-            android:layout_height="46dp"
+            android:layout_height="44dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
-            android:textColor="#FFFFFF"
+            android:textColor="#0A84FF"
             android:textSize="15sp"
             android:textStyle="bold"
             android:text="1" />
@@ -293,7 +291,7 @@
         android:layout_height="60dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="18dp"
-        android:layout_marginBottom="96dp"
+        android:layout_marginBottom="94dp"
         android:background="@drawable/bg_fab_glow"
         android:padding="16dp"
         android:scaleType="fitCenter"
@@ -312,7 +310,7 @@
         android:id="@+id/lockOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@drawable/bg_gradient_v2"
+        android:background="@drawable/bg_ios_black"
         android:visibility="visible">
 
         <LinearLayout
@@ -324,8 +322,8 @@
 
             <ImageButton
                 android:id="@+id/lockIcon"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
+                android:layout_width="54dp"
+                android:layout_height="54dp"
                 android:background="@null"
                 android:padding="4dp"
                 android:scaleType="fitCenter"
@@ -696,9 +694,9 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text=">>>"
+                            android:text="root@ghost:~#"
                             android:textColor="#00FF41"
-                            android:textSize="14sp"
+                            android:textSize="12sp"
                             android:fontFamily="monospace"
                             android:layout_marginEnd="6dp" />
 
