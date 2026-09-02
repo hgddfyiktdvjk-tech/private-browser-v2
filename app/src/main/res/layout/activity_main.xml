@@ -20,7 +20,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="20dp"
-                android:layout_marginBottom="16dp"
+                android:layout_marginBottom="20dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
@@ -28,9 +28,9 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="متصفحك الخاص"
+                    android:text="متصفحي"
                     android:textColor="#FFFFFF"
-                    android:textSize="28sp"
+                    android:textSize="34sp"
                     android:textStyle="bold" />
 
                 <ImageButton
@@ -48,12 +48,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="16dp"
-                android:layout_marginBottom="16dp"
+                android:layout_marginBottom="18dp"
                 android:background="@drawable/bg_search_bar_ios"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:paddingHorizontal="14dp"
-                android:paddingVertical="12dp">
+                android:paddingVertical="11dp">
 
                 <TextView
                     android:layout_width="wrap_content"
@@ -83,7 +83,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginHorizontal="16dp"
-                android:layout_marginBottom="20dp"
+                android:layout_marginBottom="24dp"
                 android:background="@drawable/bg_ios_row"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
@@ -125,7 +125,9 @@
                     android:id="@+id/protectionSwitch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:checked="true" />
+                    android:checked="true"
+                    android:thumbTint="#FFFFFF"
+                    android:trackTint="#30D158" />
             </LinearLayout>
 
             <ScrollView
@@ -162,7 +164,7 @@
                 android:orientation="horizontal"
                 android:background="@drawable/bg_top_bar_ios"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="12dp"
+                android:paddingVertical="11dp"
                 android:gravity="center_vertical">
 
                 <ImageView
@@ -186,12 +188,12 @@
 
                 <ImageButton
                     android:id="@+id/menuButtonTop"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
                     android:background="@drawable/bg_bottom_button_ripple"
                     android:padding="9dp"
                     android:scaleType="fitCenter"
-                    android:src="@drawable/ic_menu"
+                    android:src="@drawable/ic_menu_ios"
                     android:contentDescription="قائمة" />
             </LinearLayout>
 
@@ -225,58 +227,58 @@
         android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:background="@drawable/bg_bottom_bar_ios"
-        android:paddingVertical="12dp"
+        android:paddingVertical="11dp"
         android:paddingHorizontal="4dp"
         android:gravity="center">
 
         <ImageButton
             android:id="@+id/backButton"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
-            android:padding="12dp"
+            android:padding="11dp"
             android:scaleType="fitCenter"
-            android:src="@drawable/ic_back"
+            android:src="@drawable/ic_back_ios"
             android:contentDescription="رجوع" />
 
         <ImageButton
             android:id="@+id/homeButton"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
-            android:padding="12dp"
+            android:padding="11dp"
             android:scaleType="fitCenter"
-            android:src="@drawable/ic_home"
+            android:src="@drawable/ic_home_ios"
             android:contentDescription="الرئيسية" />
 
         <ImageButton
             android:id="@+id/menuButton"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
-            android:padding="12dp"
+            android:padding="11dp"
             android:scaleType="fitCenter"
-            android:src="@drawable/ic_menu"
+            android:src="@drawable/ic_menu_ios"
             android:contentDescription="القائمة" />
 
         <ImageButton
             android:id="@+id/downloadsButton"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
-            android:padding="12dp"
+            android:padding="11dp"
             android:scaleType="fitCenter"
-            android:src="@drawable/ic_download"
+            android:src="@drawable/ic_download_ios"
             android:contentDescription="التحميلات" />
 
         <Button
             android:id="@+id/tabsButton"
             android:layout_width="0dp"
-            android:layout_height="44dp"
+            android:layout_height="42dp"
             android:layout_weight="1"
             android:background="@drawable/bg_bottom_button_ripple"
             android:textColor="#0A84FF"
@@ -291,7 +293,7 @@
         android:layout_height="60dp"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="18dp"
-        android:layout_marginBottom="94dp"
+        android:layout_marginBottom="92dp"
         android:background="@drawable/bg_fab_glow"
         android:padding="16dp"
         android:scaleType="fitCenter"
